@@ -1,4 +1,5 @@
 import os
+import logging
 
 from interfaces.abstractFactory import AbstractFactory
 from github import Github, Auth
@@ -27,12 +28,12 @@ class GithubFactory(AbstractFactory):
         return self.issues
     
     def get_modified_files(self, pull_request: PullRequest):
-        self.files = pull_request.pull.get_files()
+        self.files = pull_request.get_files()
         return self.files
     
-    def get_pull_requests(self, issue: Issue, repo: Repository):
+    def get_pull_request(self, issue: Issue, repo: Repository):
         self.pullHtmlId = issue.pull_request.html_url.rsplit('/', 1)[-1]
-        self.pull = repo.get_pull(number = self.pullHtmlId)
+        self.pull = repo.get_pull(number = int(self.pullHtmlId))
         return self.pull
     
     def get_repository(self):

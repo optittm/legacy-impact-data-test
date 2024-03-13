@@ -4,7 +4,8 @@ from models.db import Base
 class ModifiedFiles(Base) :
     __tablename__ = "modifiedFiles"
     
-    sha = Column(String, primary_key=True)
+    id = Column(Integer, primary_key=True)
+    sha = Column(String)
     filename = Column(String)
     status = Column(String)
     patch = Column(String)
@@ -13,7 +14,8 @@ class ModifiedFiles(Base) :
     changes = Column(Integer)
     pullRequestId = Column(Integer, ForeignKey("pullRequest.id"))
     
-    def __init__(self, sha: str, filename: str, status: str, patch: str, additions: int, deletions: int, changes: int, pullRequestId: int):
+    def __init__(self, id: int, sha: str, filename: str, status: str, patch: str, additions: int, deletions: int, changes: int, pullRequestId: int):
+        self.id = id
         self.sha = sha
         self.filename = filename
         self.status = status
@@ -25,6 +27,7 @@ class ModifiedFiles(Base) :
     
     def get_modified_files_data(self):
         return {
+            "id": self.id,
             "sha": self.sha,
             "filename": self.filename,
             "status": self.status,

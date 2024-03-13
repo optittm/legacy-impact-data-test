@@ -18,7 +18,7 @@ class AbstractFactory(ABC):
         raise NotImplementedError()
     
     @abstractmethod
-    def get_pull_requests(self):
+    def get_pull_request(self):
         raise NotImplementedError()
     
     @abstractmethod
