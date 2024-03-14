@@ -24,3 +24,7 @@ class AbstractFactory(ABC):
     @abstractmethod
     def get_modified_files(self):
         raise NotImplementedError()
+    
+    @abstractmethod
+    def find_repos(self):
+        raise NotImplementedError()

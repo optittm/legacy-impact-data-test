@@ -1,5 +1,4 @@
 import os
-import logging
 
 from interfaces.abstractFactory import AbstractFactory
 from github import Github, Auth
@@ -9,6 +8,8 @@ from models.issue import Issue
 from models.pullRequest import PullRequest
 from models.modifiedFiles import ModifiedFiles
 from models.repository import Repository
+from rich.console import Console
+from rich.table import Table
 
 class GithubFactory(AbstractFactory):
     
@@ -43,3 +44,19 @@ class GithubFactory(AbstractFactory):
     def get_comments(self, issue: Issue):
         self.comments = issue.get_comments()
         return self.comments
+    
+    def find_repos(self):
+        i = 0
+        console = Console()
+        table = Table(title="Repositories")
+        columns = ["FullName", "Stars", "Url"]
+        for column in columns:
+            table.add_column(column, justify="center")
+        
+        repos = self.g.search_repositories(query=f"stars:>={os.getenv('MIN_STARS')} language:{os.getenv('LANG')}")
+        for repo in repos:
+            table.add_row(repo.full_name, str(repo.stargazers_count), repo.html_url)
+            i += 1
+            if i == int(os.getenv('NB_REPO')):
+                console.print(table)
+                break

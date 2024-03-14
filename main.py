@@ -1,9 +1,11 @@
 import logging
 import sqlalchemy as db
 import os
+import sys
 
 from sqlalchemy.exc import ArgumentError
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.sql.expression import func
 from utils.containers import Container, providers
 from dependency_injector.wiring import inject
 from interfaces.gitFactory import GithubFactory
@@ -32,8 +34,18 @@ def configure_session(container: Container):
     )
 
 @inject
-def main():
-    i = 0
+def fetch_stocked_data():
+    print("I fetch Data")
+    pass
+
+@inject
+def find_repo():
+    gitFactory.find_repos()
+
+@inject
+def get_data_repo():
+    max_id = gitFactory.session.query(func.max(ModifiedFiles.id)).scalar()
+    i = max_id if max_id != None else 0
     repo = gitFactory.get_repository()
     repository = Repository(repo.id, repo.full_name, repo.description, repo.language, repo.stargazers_count)
     gitFactory.session.add(repository)
@@ -81,4 +93,10 @@ if __name__ == "__main__":
     )
     gitFactory = container.git_factory()
     
-    main()
+    scripts = {
+        "1": get_data_repo,
+        "2": find_repo,
+        "3": fetch_stocked_data
+    }
+    arg = sys.argv[1]
+    scripts[arg]()
