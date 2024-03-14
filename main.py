@@ -3,6 +3,7 @@ import sqlalchemy as db
 import os
 import sys
 
+from github import Github, Auth
 from sqlalchemy.exc import ArgumentError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql.expression import func
@@ -35,13 +36,12 @@ def configure_session(container: Container):
     )
 
 @inject
-def fetch_stocked_data():
-    print("I fetch Data")
-    pass
-
-@inject
 def find_repo():
-    gitFactory.find_repos()
+    gitFactory.find_repos(
+        os.getenv('MIN_STARS'),
+        os.getenv('LANG'),
+        os.getenv('NB_REPO')
+    )
 
 @inject
 def get_data_repo():
@@ -57,7 +57,7 @@ def get_data_repo():
         bar.next()
         try:
             pull_request = gitFactory.get_pull_request(issue, repo)
-            if pull_request.merged_at == None:
+            if not pull_request.is_merged():
                 logging.info("Pull Request not merged for issue: " + str(issue.id))
                 continue
         except:
@@ -92,15 +92,16 @@ if __name__ == "__main__":
     container.git_factory.override(
         providers.Factory(
             GithubFactory,
-            session = container.session
+            session = container.session,
+            repo_name = os.getenv("REPOSITORY_NAME"),
+            g = Github(auth=Auth.Token(os.getenv('GITHUB_TOKEN')))
         )
     )
     gitFactory = container.git_factory()
     
     scripts = {
         "1": get_data_repo,
-        "2": find_repo,
-        "3": fetch_stocked_data
+        "2": find_repo
     }
     arg = sys.argv[1]
     scripts[arg]()

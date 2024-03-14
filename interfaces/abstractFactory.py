@@ -2,8 +2,9 @@ from abc import ABC, abstractmethod
 
 class AbstractFactory(ABC):
     
-    def __init__(self, session):
+    def __init__(self, session, repo_name):
         self.session = session
+        self.repo_name = repo_name
     
     @abstractmethod
     def get_issues(self):

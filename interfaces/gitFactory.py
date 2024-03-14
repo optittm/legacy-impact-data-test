@@ -1,28 +1,17 @@
 import os
 
 from interfaces.abstractFactory import AbstractFactory
-from github import Github, Auth
-from dependency_injector import providers
-from models.comment import Comment
 from models.issue import Issue
 from models.pullRequest import PullRequest
-from models.modifiedFiles import ModifiedFiles
 from models.repository import Repository
 from rich.console import Console
 from rich.table import Table
 
 class GithubFactory(AbstractFactory):
     
-    pull_request = providers.Factory(PullRequest)
-    modified_files = providers.Factory(ModifiedFiles)
-    issue = providers.Factory(Issue)
-    repository = providers.Factory(Repository)
-    comment = providers.Factory(Comment)
-    
-    def __init__(self, session):
-        AbstractFactory.__init__(self, session)
-        self.repo_name = os.getenv('REPOSITORY_NAME')
-        self.g = Github(auth=Auth.Token(os.getenv('GITHUB_TOKEN')))
+    def __init__(self, session, repo_name, g):
+        AbstractFactory.__init__(self, session, repo_name)
+        self.g = g
     
     def get_issues(self, repo: Repository):
         self.issues = repo.get_issues(state = "all")
@@ -45,7 +34,7 @@ class GithubFactory(AbstractFactory):
         self.comments = issue.get_comments()
         return self.comments
     
-    def find_repos(self):
+    def find_repos(self, stars, lang, nb_repo):
         i = 0
         console = Console()
         table = Table(title="Repositories")
@@ -53,10 +42,10 @@ class GithubFactory(AbstractFactory):
         for column in columns:
             table.add_column(column, justify="center")
         
-        repos = self.g.search_repositories(query=f"stars:>={os.getenv('MIN_STARS')} language:{os.getenv('LANG')}")
+        repos = self.g.search_repositories(query=f"stars:>={stars} language:{lang}")
         for repo in repos:
             table.add_row(repo.full_name, str(repo.stargazers_count), repo.html_url)
             i += 1
-            if i == int(os.getenv('NB_REPO')):
+            if i == nb_repo:
                 console.print(table)
                 break
