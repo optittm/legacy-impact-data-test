@@ -15,6 +15,7 @@ from models.issue import Issue
 from models.pullRequest import PullRequest
 from models.modifiedFiles import ModifiedFiles
 from models.comment import Comment
+from progress.bar import IncrementalBar
 
 logging.basicConfig(filename='logs.log', encoding='utf-8', level=logging.DEBUG)
 
@@ -51,7 +52,9 @@ def get_data_repo():
     gitFactory.session.add(repository)
     
     issues = gitFactory.get_issues(repo)
+    bar = IncrementalBar("Fetching data", max = issues.totalCount)
     for issue in issues:
+        bar.next()
         try:
             pull_request = gitFactory.get_pull_request(issue, repo)
             if pull_request.merged_at == None:
@@ -81,6 +84,7 @@ def get_data_repo():
         logging.info("Committed data for issue: " + str(issue.id))
     
     gitFactory.session.commit()
+    bar.finish()
 
 if __name__ == "__main__":
     container = Container()
