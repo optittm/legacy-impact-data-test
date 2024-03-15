@@ -1,38 +1,81 @@
-import os
-
 from interfaces.abstractFactory import AbstractFactory
-from models.issue import Issue
-from models.pullRequest import PullRequest
-from models.repository import Repository
 from rich.console import Console
 from rich.table import Table
+from models.repository import Repository
+from models.issue import Issue
+from models.pullRequest import PullRequest
+from models.modifiedFiles import ModifiedFiles
+from models.comment import Comment
 
 class GithubFactory(AbstractFactory):
     
     def __init__(self, session, repo_name, g):
         AbstractFactory.__init__(self, session, repo_name)
         self.g = g
+        self.file_id = 0
     
-    def get_issues(self, repo: Repository):
-        self.issues = repo.get_issues(state = "all")
-        return self.issues
+    def get_issues(self):
+        self.issues = self.g.search_issues(query=f"repo:{self.repository.full_name} is:pr is:merged")
+        for issue in self.issues:
+            yield Issue(
+                id = issue.id,
+                title = issue.title,
+                body = issue.body,
+                state = issue.state,
+                repositoryId = self.repository.id
+            )
     
-    def get_modified_files(self, pull_request: PullRequest):
-        self.files = pull_request.get_files()
-        return self.files
+    def get_modified_files(self, i: int):
+        self.files = self.pull.get_files()
+        if i > self.file_id:
+            self.file_id = i
+        for file in self.files:
+            self.file_id += 1
+            yield ModifiedFiles(
+                id = self.file_id,
+                sha = file.sha,
+                filename = file.filename,
+                status = file.status,
+                patch = file.patch,
+                additions = file.additions,
+                deletions = file.deletions,
+                changes = file.changes,
+                pullRequestId = self.pull.id
+            )
     
-    def get_pull_request(self, issue: Issue, repo: Repository):
-        self.pullHtmlId = issue.pull_request.html_url.rsplit('/', 1)[-1]
-        self.pull = repo.get_pull(number = int(self.pullHtmlId))
-        return self.pull
+    def get_pull_request(self, j: int):
+        self.pullHtmlId = self.issues[j].pull_request.html_url.rsplit('/', 1)[-1]
+        self.pull = self.repository.get_pull(number = int(self.pullHtmlId))
+        if self.pull.is_merged():
+            return PullRequest(
+                id = self.pull.id,
+                title = self.pull.title,
+                body = self.pull.body,
+                state = self.pull.state,
+                shaBase = self.pull.base.sha,
+                issueId = self.issues[j].id
+            )
+        else:
+            return False
     
     def get_repository(self):
         self.repository = self.g.get_repo(self.repo_name)
-        return self.repository
+        return Repository(
+            id = self.repository.id,
+            fullName = self.repository.full_name,
+            description = self.repository.description,
+            language = self.repository.language,
+            stars = self.repository.stargazers_count
+        )
     
-    def get_comments(self, issue: Issue):
-        self.comments = issue.get_comments()
-        return self.comments
+    def get_comments(self, j: int):
+        self.comments = self.issues[j].get_comments()
+        for comment in self.comments:
+            yield Comment(
+                id = comment.id,
+                body = comment.body,
+                issueId = self.issues[j].id
+            )
     
     def find_repos(self, stars, lang, nb_repo):
         i = 0
@@ -46,6 +89,6 @@ class GithubFactory(AbstractFactory):
         for repo in repos:
             table.add_row(repo.full_name, str(repo.stargazers_count), repo.html_url)
             i += 1
-            if i == nb_repo:
+            if i == int(nb_repo):
                 console.print(table)
                 break

@@ -47,17 +47,19 @@ def find_repo():
 def get_data_repo():
     max_id = gitFactory.session.query(func.max(ModifiedFiles.id)).scalar()
     i = max_id if max_id != None else 0
-    repo = gitFactory.get_repository()
-    repository = Repository(repo.id, repo.full_name, repo.description, repo.language, repo.stargazers_count)
-    gitFactory.session.add(repository)
+    j = -1
     
-    issues = gitFactory.get_issues(repo)
-    bar = IncrementalBar("Fetching data", max = issues.totalCount)
+    repo = gitFactory.get_repository()
+    gitFactory.session.add(repo)
+    
+    issues = list(gitFactory.get_issues())
+    bar = IncrementalBar("Fetching data", max = len(issues))
     for issue in issues:
+        j += 1
         bar.next()
         try:
-            pull_request = gitFactory.get_pull_request(issue, repo)
-            if not pull_request.is_merged():
+            pull_request = gitFactory.get_pull_request(j)
+            if not pull_request:
                 logging.info("Pull Request not merged for issue: " + str(issue.id))
                 continue
         except:
@@ -65,22 +67,10 @@ def get_data_repo():
             continue
         
         logging.info("Pull Request merged for issue: " + str(issue.id))
-        issue_to_save = Issue(issue.id, issue.title, issue.body, issue.state, repo.id)
-        gitFactory.session.add(issue_to_save)
-        
-        pull_request_to_save = PullRequest(pull_request.id, pull_request.title, pull_request.body, pull_request.state, pull_request.merged_at, pull_request.base.sha, issue.id)
-        gitFactory.session.add(pull_request_to_save)
-        
-        comments = gitFactory.get_comments(issue)
-        for comment in comments:
-            comment_to_save = Comment(comment.id, comment.body, issue.id)
-            gitFactory.session.add(comment_to_save)
-        
-        modified_files = gitFactory.get_modified_files(pull_request)
-        for file in modified_files:
-            i += 1
-            file_to_save = ModifiedFiles(i, file.sha, file.filename, file.status, file.patch, file.additions, file.deletions, file.changes, pull_request.id)
-            gitFactory.session.add(file_to_save)
+        gitFactory.session.add(issue)
+        gitFactory.session.add(pull_request)
+        gitFactory.session.add_all(list(gitFactory.get_comments(j)))
+        gitFactory.session.add_all(list(gitFactory.get_modified_files(i)))
         logging.info("Committed data for issue: " + str(issue.id))
     
     gitFactory.session.commit()
