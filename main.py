@@ -2,6 +2,7 @@ import logging
 import sqlalchemy as db
 import os
 import sys
+import click
 
 from github import Github, Auth
 from sqlalchemy.exc import ArgumentError
@@ -11,14 +12,14 @@ from utils.containers import Container, providers
 from dependency_injector.wiring import inject
 from interfaces.gitFactory import GithubFactory
 from models.db import setup_db
-from models.repository import Repository
-from models.issue import Issue
-from models.pullRequest import PullRequest
 from models.modifiedFiles import ModifiedFiles
-from models.comment import Comment
 from progress.bar import IncrementalBar
 
 logging.basicConfig(filename='logs.log', encoding='utf-8', level=logging.DEBUG)
+
+@click.group()
+def cli():
+    pass
 
 @inject
 def configure_session(container: Container):
@@ -35,21 +36,23 @@ def configure_session(container: Container):
         providers.Singleton(sessionM)
     )
 
+@click.command()
+@click.option('--min_stars', envvar='MIN_STARS', default=os.getenv('MIN_STARS'), help='Minimum stars for a repository')
+@click.option('--lang', envvar='LANG', default=os.getenv('LANG'), help='Language of the repository')
+@click.option('--nb_repo', envvar='NB_REPO', default=os.getenv('NB_REPO'), help='Number of repositories to fetch')
 @inject
-def find_repo():
-    gitFactory.find_repos(
-        os.getenv('MIN_STARS'),
-        os.getenv('LANG'),
-        os.getenv('NB_REPO')
-    )
+def find_repo(min_stars, lang, nb_repo):
+    gitFactory.find_repos(min_stars, lang, nb_repo)
 
+@click.command()
+@click.option('--repository_name', envvar='REPOSITORY_NAME', default=os.getenv('REPOSITORY_NAME'), help='Name of the repository')
 @inject
-def get_data_repo():
+def get_data_repo(repository_name):
     max_id = gitFactory.session.query(func.max(ModifiedFiles.id)).scalar()
     i = max_id if max_id != None else 0
     j = -1
     
-    repo = gitFactory.get_repository()
+    repo = gitFactory.get_repository(repository_name)
     gitFactory.session.add(repo)
     
     issues = list(gitFactory.get_issues())
@@ -76,6 +79,9 @@ def get_data_repo():
     gitFactory.session.commit()
     bar.finish()
 
+cli.add_command(get_data_repo)
+cli.add_command(find_repo)
+
 if __name__ == "__main__":
     container = Container()
     configure_session(container)
@@ -83,15 +89,9 @@ if __name__ == "__main__":
         providers.Factory(
             GithubFactory,
             session = container.session,
-            repo_name = os.getenv("REPOSITORY_NAME"),
             g = Github(auth=Auth.Token(os.getenv('GITHUB_TOKEN')))
         )
     )
     gitFactory = container.git_factory()
     
-    scripts = {
-        "1": get_data_repo,
-        "2": find_repo
-    }
-    arg = sys.argv[1]
-    scripts[arg]()
+    cli()

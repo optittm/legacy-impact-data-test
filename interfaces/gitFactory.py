@@ -9,8 +9,8 @@ from models.comment import Comment
 
 class GithubFactory(AbstractFactory):
     
-    def __init__(self, session, repo_name, g):
-        AbstractFactory.__init__(self, session, repo_name)
+    def __init__(self, session, g):
+        AbstractFactory.__init__(self, session)
         self.g = g
         self.file_id = 0
     
@@ -58,8 +58,8 @@ class GithubFactory(AbstractFactory):
         else:
             return False
     
-    def get_repository(self):
-        self.repository = self.g.get_repo(self.repo_name)
+    def get_repository(self, repo_name: str):
+        self.repository = self.g.get_repo(repo_name)
         return Repository(
             id = self.repository.id,
             fullName = self.repository.full_name,
