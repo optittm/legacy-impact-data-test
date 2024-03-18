@@ -81,13 +81,18 @@ class GithubFactory(AbstractFactory):
         i = 0
         console = Console()
         table = Table(title="Repositories")
-        columns = ["FullName", "Stars", "Url"]
+        columns = ["FullName", "Stars", "Nb Issues", "Url"]
         for column in columns:
             table.add_column(column, justify="center")
         
         repos = self.g.search_repositories(query=f"stars:>={stars} language:{lang}")
         for repo in repos:
-            table.add_row(repo.full_name, str(repo.stargazers_count), repo.html_url)
+            table.add_row(
+                repo.full_name,
+                str(repo.stargazers_count),
+                str(self.g.search_issues(query=f"repo:{repo.full_name} is:pr is:merged").totalCount),
+                repo.html_url
+            )
             i += 1
             if i == int(nb_repo):
                 console.print(table)
