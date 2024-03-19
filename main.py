@@ -1,16 +1,17 @@
 import logging
 import sqlalchemy as db
 import os
-import sys
 import click
 
 from github import Github, Auth
+from rich.console import Console
+from rich.table import Table
 from sqlalchemy.exc import ArgumentError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql.expression import func
 from utils.containers import Container, providers
 from dependency_injector.wiring import inject
-from interfaces.gitFactory import GithubFactory
+from interfaces.GithubFactory import GithubFactory
 from models.db import setup_db
 from models.modifiedFiles import ModifiedFiles
 from progress.bar import IncrementalBar
@@ -42,26 +43,35 @@ def configure_session(container: Container):
 @click.option('--nb_repo', envvar='NB_REPO', default=os.getenv('NB_REPO'), help='Number of repositories to fetch')
 @inject
 def find_repo(min_stars, lang, nb_repo):
-    gitFactory.find_repos(min_stars, lang, nb_repo)
+    console = Console()
+    table = Table(title="Repositories")
+    columns = ["FullName", "Stars", "Nb Issues", "Topics", "Url"]
+    for column in columns:
+        table.add_column(column, justify="center")
+    
+    repos_data = GithubFactory.find_repos(min_stars, lang, nb_repo)
+    for data in repos_data:
+        table.add_row(data[0], data[1], data[2], data[3], data[4])
+    console.print(table)
 
 @click.command()
 @click.option('--repository_name', envvar='REPOSITORY_NAME', default=os.getenv('REPOSITORY_NAME'), help='Name of the repository')
 @inject
 def get_data_repo(repository_name):
-    max_id = gitFactory.session.query(func.max(ModifiedFiles.id)).scalar()
+    max_id = GithubFactory.session.query(func.max(ModifiedFiles.id)).scalar()
     i = max_id if max_id != None else 0
     j = -1
     
-    repo = gitFactory.get_repository(repository_name)
-    gitFactory.session.add(repo)
+    repo = GithubFactory.get_repository(repository_name)
+    GithubFactory.session.add(repo)
     
-    issues = list(gitFactory.get_issues())
+    issues = list(GithubFactory.get_issues())
     bar = IncrementalBar("Fetching data", max = len(issues))
     for issue in issues:
         j += 1
         bar.next()
         try:
-            pull_request = gitFactory.get_pull_request(j)
+            pull_request = GithubFactory.get_pull_request(j)
             if not pull_request:
                 logging.info("Pull Request not merged for issue: " + str(issue.id))
                 continue
@@ -70,13 +80,13 @@ def get_data_repo(repository_name):
             continue
         
         logging.info("Pull Request merged for issue: " + str(issue.id))
-        gitFactory.session.add(issue)
-        gitFactory.session.add(pull_request)
-        gitFactory.session.add_all(list(gitFactory.get_comments(j)))
-        gitFactory.session.add_all(list(gitFactory.get_modified_files(i)))
+        GithubFactory.session.add(issue)
+        GithubFactory.session.add(pull_request)
+        GithubFactory.session.add_all(list(GithubFactory.get_comments(j)))
+        GithubFactory.session.add_all(list(GithubFactory.get_modified_files(i)))
         logging.info("Committed data for issue: " + str(issue.id))
     
-    gitFactory.session.commit()
+    GithubFactory.session.commit()
     bar.finish()
 
 cli.add_command(get_data_repo)
@@ -92,6 +102,6 @@ if __name__ == "__main__":
             g = Github(auth=Auth.Token(os.getenv('GITHUB_TOKEN')))
         )
     )
-    gitFactory = container.git_factory()
+    GithubFactory = container.git_factory()
     
     cli()

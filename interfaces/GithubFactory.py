@@ -1,16 +1,14 @@
-from interfaces.abstractFactory import AbstractFactory
-from rich.console import Console
-from rich.table import Table
+from interfaces.AbcFactoryGit import AbcFactoryGit
 from models.repository import Repository
 from models.issue import Issue
 from models.pullRequest import PullRequest
 from models.modifiedFiles import ModifiedFiles
 from models.comment import Comment
 
-class GithubFactory(AbstractFactory):
+class GithubFactory(AbcFactoryGit):
     
     def __init__(self, session, g):
-        AbstractFactory.__init__(self, session)
+        AbcFactoryGit.__init__(self, session)
         self.g = g
         self.file_id = 0
     
@@ -25,10 +23,10 @@ class GithubFactory(AbstractFactory):
                 repositoryId = self.repository.id
             )
     
-    def get_modified_files(self, i: int):
+    def get_modified_files(self, max_id_db: int):
         self.files = self.pull.get_files()
-        if i > self.file_id:
-            self.file_id = i
+        if max_id_db > self.file_id:
+            self.file_id = max_id_db
         for file in self.files:
             self.file_id += 1
             yield ModifiedFiles(
@@ -56,7 +54,7 @@ class GithubFactory(AbstractFactory):
                 issueId = self.issues[j].id
             )
         else:
-            return False
+            return None
     
     def get_repository(self, repo_name: str):
         self.repository = self.g.get_repo(repo_name)
@@ -78,22 +76,16 @@ class GithubFactory(AbstractFactory):
             )
     
     def find_repos(self, stars, lang, nb_repo):
-        i = 0
-        console = Console()
-        table = Table(title="Repositories")
-        columns = ["FullName", "Stars", "Nb Issues", "Url"]
-        for column in columns:
-            table.add_column(column, justify="center")
-        
+        i = 0        
         repos = self.g.search_repositories(query=f"stars:>={stars} language:{lang}")
         for repo in repos:
-            table.add_row(
+            yield(
                 repo.full_name,
                 str(repo.stargazers_count),
                 str(self.g.search_issues(query=f"repo:{repo.full_name} is:pr is:merged").totalCount),
+                ', '.join(repo.topics),
                 repo.html_url
             )
             i += 1
             if i == int(nb_repo):
-                console.print(table)
                 break

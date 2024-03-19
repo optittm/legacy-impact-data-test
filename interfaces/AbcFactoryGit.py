@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-class AbstractFactory(ABC):
+class AbcFactoryGit(ABC):
     
     def __init__(self, session):
         self.session = session

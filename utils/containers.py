@@ -1,5 +1,5 @@
 from dependency_injector import containers, providers
-from interfaces.abstractFactory import AbstractFactory
+from interfaces.AbcFactoryGit import AbcFactoryGit
 from dotenv import load_dotenv
 from sqlalchemy.orm import sessionmaker
 
@@ -8,4 +8,4 @@ class Container(containers.DeclarativeContainer):
     sessionM = sessionmaker()
     session = providers.Singleton(sessionM)
     
-    git_factory = providers.AbstractFactory(AbstractFactory)
+    git_factory = providers.AbstractFactory(AbcFactoryGit)
