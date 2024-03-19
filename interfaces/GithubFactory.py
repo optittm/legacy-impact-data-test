@@ -7,8 +7,7 @@ from models.comment import Comment
 
 class GithubFactory(AbcFactoryGit):
     
-    def __init__(self, session, g):
-        AbcFactoryGit.__init__(self, session)
+    def __init__(self, g):
         self.g = g
         self.file_id = 0
     
@@ -83,7 +82,6 @@ class GithubFactory(AbcFactoryGit):
                 repo.full_name,
                 str(repo.stargazers_count),
                 str(self.g.search_issues(query=f"repo:{repo.full_name} is:pr is:merged").totalCount),
-                ', '.join(repo.topics),
                 repo.html_url
             )
             i += 1

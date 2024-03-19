@@ -2,9 +2,6 @@ from abc import ABC, abstractmethod
 
 class AbcFactoryGit(ABC):
     
-    def __init__(self, session):
-        self.session = session
-    
     @abstractmethod
     def get_issues(self):
         raise NotImplementedError()

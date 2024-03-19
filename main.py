@@ -1,26 +1,21 @@
 import logging
-import sqlalchemy as db
 import os
 import click
+import sqlalchemy as db
 
 from github import Github, Auth
 from rich.console import Console
 from rich.table import Table
-from sqlalchemy.exc import ArgumentError
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.sql.expression import func
+from interfaces.SQLite import SQLite
 from utils.containers import Container, providers
 from dependency_injector.wiring import inject
 from interfaces.GithubFactory import GithubFactory
-from models.db import setup_db
-from models.modifiedFiles import ModifiedFiles
 from progress.bar import IncrementalBar
+from sqlalchemy.orm import sessionmaker
+from models.db import setup_db
+from sqlalchemy.exc import ArgumentError
 
 logging.basicConfig(filename='logs.log', encoding='utf-8', level=logging.DEBUG)
-
-@click.group()
-def cli():
-    pass
 
 @inject
 def configure_session(container: Container):
@@ -29,13 +24,29 @@ def configure_session(container: Container):
     except ArgumentError as e:
         raise (f"Error from sqlalchemy : {str(e)}")
     
-    sessionM = sessionmaker()
-    sessionM.configure(bind=engine)
+    Session = sessionmaker()
+    Session.configure(bind=engine)
     setup_db(engine)
-
+    
     container.session.override(
-        providers.Singleton(sessionM)
+        providers.Singleton(Session)
     )
+    container.git_factory.override(
+        providers.Factory(
+            GithubFactory,
+            g = Github(auth=Auth.Token(os.getenv('GITHUB_TOKEN')))
+        )
+    )
+    container.db_interface.override(
+        providers.Singleton(
+            SQLite,
+            session = container.session
+        )
+    )
+
+@click.group()
+def cli():
+    pass
 
 @click.command()
 @click.option('--min_stars', envvar='MIN_STARS', default=os.getenv('MIN_STARS'), help='Minimum stars for a repository')
@@ -49,29 +60,29 @@ def find_repo(min_stars, lang, nb_repo):
     for column in columns:
         table.add_column(column, justify="center")
     
-    repos_data = GithubFactory.find_repos(min_stars, lang, nb_repo)
+    repos_data = githubFactory.find_repos(min_stars, lang, nb_repo)
     for data in repos_data:
-        table.add_row(data[0], data[1], data[2], data[3], data[4])
+        table.add_row(data[0], data[1], data[2], data[3])
     console.print(table)
 
 @click.command()
 @click.option('--repository_name', envvar='REPOSITORY_NAME', default=os.getenv('REPOSITORY_NAME'), help='Name of the repository')
 @inject
 def get_data_repo(repository_name):
-    max_id = GithubFactory.session.query(func.max(ModifiedFiles.id)).scalar()
+    max_id = sqlite.query_max_id()
     i = max_id if max_id != None else 0
     j = -1
     
-    repo = GithubFactory.get_repository(repository_name)
-    GithubFactory.session.add(repo)
+    repo = githubFactory.get_repository(repository_name)
+    sqlite.database_insert(repo)
     
-    issues = list(GithubFactory.get_issues())
+    issues = list(githubFactory.get_issues())
     bar = IncrementalBar("Fetching data", max = len(issues))
     for issue in issues:
         j += 1
         bar.next()
         try:
-            pull_request = GithubFactory.get_pull_request(j)
+            pull_request = githubFactory.get_pull_request(j)
             if not pull_request:
                 logging.info("Pull Request not merged for issue: " + str(issue.id))
                 continue
@@ -80,13 +91,12 @@ def get_data_repo(repository_name):
             continue
         
         logging.info("Pull Request merged for issue: " + str(issue.id))
-        GithubFactory.session.add(issue)
-        GithubFactory.session.add(pull_request)
-        GithubFactory.session.add_all(list(GithubFactory.get_comments(j)))
-        GithubFactory.session.add_all(list(GithubFactory.get_modified_files(i)))
+        sqlite.database_insert(issue)
+        sqlite.database_insert(pull_request)
+        sqlite.database_insert_many(list(githubFactory.get_comments(j)))
+        sqlite.database_insert_many(list(githubFactory.get_modified_files(i)))
         logging.info("Committed data for issue: " + str(issue.id))
     
-    GithubFactory.session.commit()
     bar.finish()
 
 cli.add_command(get_data_repo)
@@ -95,13 +105,8 @@ cli.add_command(find_repo)
 if __name__ == "__main__":
     container = Container()
     configure_session(container)
-    container.git_factory.override(
-        providers.Factory(
-            GithubFactory,
-            session = container.session,
-            g = Github(auth=Auth.Token(os.getenv('GITHUB_TOKEN')))
-        )
-    )
-    GithubFactory = container.git_factory()
+    
+    githubFactory = container.git_factory()
+    sqlite = container.db_interface()
     
     cli()
