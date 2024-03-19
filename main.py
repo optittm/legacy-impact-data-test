@@ -48,6 +48,16 @@ def configure_session(container: Container):
 def cli():
     pass
 
+"""find_repo command to search for GitHub repositories based on criteria.
+
+Parameters:
+- min_stars: Minimum number of stars for repository to be included.
+- lang: Language to filter repositories by. 
+- nb_repo: Max number of repositories to return.
+
+Prints a table with repository name, stars, issues, topics, and URL.
+Uses the injected githubFactory to search GitHub and find repositories 
+matching the criteria."""
 @click.command()
 @click.option('--min_stars', envvar='MIN_STARS', default=os.getenv('MIN_STARS'), help='Minimum stars for a repository')
 @click.option('--lang', envvar='LANG', default=os.getenv('LANG'), help='Language of the repository')
@@ -65,6 +75,15 @@ def find_repo(min_stars, lang, nb_repo):
         table.add_row(data[0], data[1], data[2], data[3])
     console.print(table)
 
+"""Fetches and stores data for a given GitHub repository.
+
+Iterates through the issues and pull requests for the repository, 
+fetching additional data like comments and modified files. Stores all
+the data in a local SQLite database for later analysis.
+
+Args:
+    repository_name: The name of the GitHub repository to fetch data for.
+"""
 @click.command()
 @click.option('--repository_name', envvar='REPOSITORY_NAME', default=os.getenv('REPOSITORY_NAME'), help='Name of the repository')
 @inject

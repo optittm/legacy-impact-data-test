@@ -11,6 +11,9 @@ class GithubFactory(AbcFactoryGit):
         self.g = g
         self.file_id = 0
     
+    """Gets issues from the GitHub API.
+    Searches for merged pull requests in the repository 
+    and yields Issue objects for each one."""
     def get_issues(self):
         self.issues = self.g.search_issues(query=f"repo:{self.repository.full_name} is:pr is:merged")
         for issue in self.issues:
@@ -22,6 +25,17 @@ class GithubFactory(AbcFactoryGit):
                 repositoryId = self.repository.id
             )
     
+    """Gets modified files from a pull request. 
+    
+    Iterates through the files modified in the pull request, assigns 
+    each one an id, and yields ModifiedFiles objects containing file
+    details and the pull request id.
+    
+    Parameters:
+        max_id_db (int): The maximum id currently stored in the db.
+    
+    Yields:
+        ModifiedFiles: The modified file with details and pull request id."""
     def get_modified_files(self, max_id_db: int):
         self.files = self.pull.get_files()
         if max_id_db > self.file_id:
@@ -40,6 +54,18 @@ class GithubFactory(AbcFactoryGit):
                 pullRequestId = self.pull.id
             )
     
+    """Gets a pull request from the GitHub API.
+    
+    Iterates through the issues searching for merged pull requests. 
+    Checks if the pull request is merged, and returns a PullRequest object 
+    containing details of the pull request if it is merged, otherwise returns None.
+    
+    Parameters:
+        j (int): The index of the current issue being checked.
+    
+    Returns:
+        PullRequest: A PullRequest object containing pull request details if merged.
+        None: If the pull request is not merged."""
     def get_pull_request(self, j: int):
         self.pullHtmlId = self.issues[j].pull_request.html_url.rsplit('/', 1)[-1]
         self.pull = self.repository.get_pull(number = int(self.pullHtmlId))
@@ -55,6 +81,14 @@ class GithubFactory(AbcFactoryGit):
         else:
             return None
     
+    """Gets a GitHub repository object for the given repository name.
+    
+    Args:
+        repo_name (str): The name of the repository.
+    
+    Returns:
+        Repository: A Repository object containing details like id, full name, 
+        description, language, and star count."""
     def get_repository(self, repo_name: str):
         self.repository = self.g.get_repo(repo_name)
         return Repository(
@@ -65,6 +99,16 @@ class GithubFactory(AbcFactoryGit):
             stars = self.repository.stargazers_count
         )
     
+    """Gets the comments for the pull request associated with the issue at index j.
+    
+    Iterates through the comments for the issue and yields Comment objects containing 
+    the comment details.
+    
+    Parameters:
+        j (int): The index of the issue to get comments for.
+    
+    Yields:
+        Comment: The next comment for the issue."""
     def get_comments(self, j: int):
         self.comments = self.issues[j].get_comments()
         for comment in self.comments:
@@ -74,6 +118,18 @@ class GithubFactory(AbcFactoryGit):
                 issueId = self.issues[j].id
             )
     
+    """Searches GitHub repositories based on stars, language, and number of repos.
+    
+    Iterates through paginated search results up to the specified number of repos. 
+    Yields repository name, stars, pull requests, and URL for each qualifying repo.
+    
+    Args:
+        stars (int): Minimum stars threshold. 
+        lang (str): Language to filter by.
+        nb_repo (int): Maximum number of repos to return.
+    
+    Yields:
+        tuple: (name, stars, pulls, url) for each qualifying repo."""
     def find_repos(self, stars, lang, nb_repo):
         i = 0        
         repos = self.g.search_repositories(query=f"stars:>={stars} language:{lang}")
