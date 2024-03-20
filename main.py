@@ -96,7 +96,7 @@ def get_data_repo(repository_name):
     sqlite.database_insert(repo)
     
     issuesList, issues = githubFactory.get_issues()
-    bar = IncrementalBar("Fetching data", max = len(issues))
+    bar = IncrementalBar("Fetching data", max = len(issuesList))
     for issue in issues:
         j += 1
         bar.next()
@@ -110,7 +110,7 @@ def get_data_repo(repository_name):
             continue
         
         logging.info("Pull Request merged for issue: " + str(issue.id))
-        sqlite.database_insert(issue)
+        sqlite.database_insert(issuesList[j])
         sqlite.database_insert(pull_request)
         sqlite.database_insert_many(list(githubFactory.get_comments(issue)))
         sqlite.database_insert_many(list(githubFactory.get_modified_files(start_id_modified_file)))
