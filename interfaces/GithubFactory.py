@@ -12,18 +12,24 @@ class GithubFactory(AbcFactoryGit):
         self.file_id = 0
     
     """Gets issues from the GitHub API.
+    
     Searches for merged pull requests in the repository 
-    and yields Issue objects for each one."""
+    and yields Issue objects for each one.
+    
+    Yields:
+        Issue: The issue with details and repository id."""
     def get_issues(self):
         self.issues = self.g.search_issues(query=f"repo:{self.repository.full_name} is:pr is:merged")
+        issuesList = []
         for issue in self.issues:
-            yield Issue(
+            issuesList.append(Issue(
                 id = issue.id,
                 title = issue.title,
                 body = issue.body,
                 state = issue.state,
                 repositoryId = self.repository.id
-            )
+            ))
+        return issuesList, self.issues
     
     """Gets modified files from a pull request. 
     
@@ -64,10 +70,10 @@ class GithubFactory(AbcFactoryGit):
         j (int): The index of the current issue being checked.
     
     Returns:
-        PullRequest: A PullRequest object containing pull request details if merged.
+        PullRequest: A PullRequest object containing pull request details if merged and it's issue id.
         None: If the pull request is not merged."""
-    def get_pull_request(self, j: int):
-        self.pullHtmlId = self.issues[j].pull_request.html_url.rsplit('/', 1)[-1]
+    def get_pull_request(self, issue: Issue):
+        self.pullHtmlId = issue.pull_request.html_url.rsplit('/', 1)[-1]
         self.pull = self.repository.get_pull(number = int(self.pullHtmlId))
         if self.pull.is_merged():
             return PullRequest(
@@ -76,14 +82,14 @@ class GithubFactory(AbcFactoryGit):
                 body = self.pull.body,
                 state = self.pull.state,
                 shaBase = self.pull.base.sha,
-                issueId = self.issues[j].id
+                issueId = issue.id
             )
         else:
             return None
     
     """Gets a GitHub repository object for the given repository name.
     
-    Args:
+    Parameters:
         repo_name (str): The name of the repository.
     
     Returns:
@@ -109,13 +115,13 @@ class GithubFactory(AbcFactoryGit):
     
     Yields:
         Comment: The next comment for the issue."""
-    def get_comments(self, j: int):
-        self.comments = self.issues[j].get_comments()
+    def get_comments(self, issue: Issue):
+        self.comments = issue.get_comments()
         for comment in self.comments:
             yield Comment(
                 id = comment.id,
                 body = comment.body,
-                issueId = self.issues[j].id
+                issueId = issue.id
             )
     
     """Searches GitHub repositories based on stars, language, and number of repos.
@@ -123,7 +129,7 @@ class GithubFactory(AbcFactoryGit):
     Iterates through paginated search results up to the specified number of repos. 
     Yields repository name, stars, pull requests, and URL for each qualifying repo.
     
-    Args:
+    Parameters:
         stars (int): Minimum stars threshold. 
         lang (str): Language to filter by.
         nb_repo (int): Maximum number of repos to return.

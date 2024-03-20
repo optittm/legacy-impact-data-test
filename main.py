@@ -81,7 +81,7 @@ Iterates through the issues and pull requests for the repository,
 fetching additional data like comments and modified files. Stores all
 the data in a local SQLite database for later analysis.
 
-Args:
+Parameters:
     repository_name: The name of the GitHub repository to fetch data for.
 """
 @click.command()
@@ -89,19 +89,19 @@ Args:
 @inject
 def get_data_repo(repository_name):
     max_id = sqlite.query_max_id()
-    i = max_id if max_id != None else 0
+    start_id_modified_file = max_id if max_id != None else 0
     j = -1
     
     repo = githubFactory.get_repository(repository_name)
     sqlite.database_insert(repo)
     
-    issues = list(githubFactory.get_issues())
+    issuesList, issues = githubFactory.get_issues()
     bar = IncrementalBar("Fetching data", max = len(issues))
     for issue in issues:
         j += 1
         bar.next()
         try:
-            pull_request = githubFactory.get_pull_request(j)
+            pull_request = githubFactory.get_pull_request(issue)
             if not pull_request:
                 logging.info("Pull Request not merged for issue: " + str(issue.id))
                 continue
@@ -112,8 +112,8 @@ def get_data_repo(repository_name):
         logging.info("Pull Request merged for issue: " + str(issue.id))
         sqlite.database_insert(issue)
         sqlite.database_insert(pull_request)
-        sqlite.database_insert_many(list(githubFactory.get_comments(j)))
-        sqlite.database_insert_many(list(githubFactory.get_modified_files(i)))
+        sqlite.database_insert_many(list(githubFactory.get_comments(issue)))
+        sqlite.database_insert_many(list(githubFactory.get_modified_files(start_id_modified_file)))
         logging.info("Committed data for issue: " + str(issue.id))
     
     bar.finish()
