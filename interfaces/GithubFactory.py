@@ -23,7 +23,7 @@ class GithubFactory(AbcFactoryGit):
         issuesList = []
         for issue in self.issues:
             issuesList.append(Issue(
-                id = issue.id,
+                githubId = issue.id,
                 title = issue.title,
                 body = issue.body,
                 state = issue.state,
@@ -42,14 +42,10 @@ class GithubFactory(AbcFactoryGit):
     
     Yields:
         ModifiedFiles: The modified file with details and pull request id."""
-    def get_modified_files(self, max_id_db: int):
+    def get_modified_files(self):
         self.files = self.pull.get_files()
-        if max_id_db > self.file_id:
-            self.file_id = max_id_db
         for file in self.files:
-            self.file_id += 1
             yield ModifiedFiles(
-                id = self.file_id,
                 sha = file.sha,
                 filename = file.filename,
                 status = file.status,
@@ -77,7 +73,7 @@ class GithubFactory(AbcFactoryGit):
         self.pull = self.repository.get_pull(number = int(self.pullHtmlId))
         if self.pull.is_merged():
             return PullRequest(
-                id = self.pull.id,
+                githubId = self.pull.id,
                 title = self.pull.title,
                 body = self.pull.body,
                 state = self.pull.state,
@@ -119,7 +115,7 @@ class GithubFactory(AbcFactoryGit):
         self.comments = issue.get_comments()
         for comment in self.comments:
             yield Comment(
-                id = comment.id,
+                githubId = comment.id,
                 body = comment.body,
                 issueId = issue.id
             )

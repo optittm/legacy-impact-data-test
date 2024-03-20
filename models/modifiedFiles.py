@@ -4,7 +4,7 @@ from models.db import Base
 class ModifiedFiles(Base) :
     __tablename__ = "modifiedFiles"
     
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     sha = Column(String)
     filename = Column(String)
     status = Column(String)

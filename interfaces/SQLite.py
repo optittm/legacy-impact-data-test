@@ -31,10 +31,3 @@ class SQLite(DbInterface):
     def database_insert_many(self, data: list[Repository | Issue | PullRequest | ModifiedFiles | Comment]):
         self.session.add_all(data)
         self.session.commit()
-    
-    """Queries the database for the maximum ID value from the ModifiedFiles table.
-    
-    Returns:
-        The maximum ID value from the ModifiedFiles table."""
-    def query_max_id(self):
-        return self.session.query(func.max(ModifiedFiles.id)).scalar()

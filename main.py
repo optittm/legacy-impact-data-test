@@ -88,8 +88,6 @@ Parameters:
 @click.option('--repository_name', envvar='REPOSITORY_NAME', default=os.getenv('REPOSITORY_NAME'), help='Name of the repository')
 @inject
 def get_data_repo(repository_name):
-    max_id = sqlite.query_max_id()
-    start_id_modified_file = max_id if max_id != None else 0
     j = -1
     
     repo = githubFactory.get_repository(repository_name)
@@ -113,7 +111,7 @@ def get_data_repo(repository_name):
         sqlite.database_insert(issuesList[j])
         sqlite.database_insert(pull_request)
         sqlite.database_insert_many(list(githubFactory.get_comments(issue)))
-        sqlite.database_insert_many(list(githubFactory.get_modified_files(start_id_modified_file)))
+        sqlite.database_insert_many(list(githubFactory.get_modified_files()))
         logging.info("Committed data for issue: " + str(issue.id))
     
     bar.finish()
