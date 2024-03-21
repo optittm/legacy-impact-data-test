@@ -139,7 +139,7 @@ class GithubFactory(AbcFactoryGit):
             yield(
                 repo.full_name,
                 str(repo.stargazers_count),
-                str(self.g.search_issues(query=f"repo:{repo.full_name} is:pr is:merged").totalCount),
+                str(self.g.search_issues(query=f"repo:{repo.full_name} is:merged linked:issue").totalCount),
                 repo.html_url
             )
             i += 1
