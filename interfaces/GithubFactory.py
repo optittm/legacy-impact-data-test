@@ -20,7 +20,7 @@ class GithubFactory(AbcFactoryGit):
         Yields:
             Issue: The issue with details and repository id."""
         
-        issues = self.g.search_issues(query=f"repo:{self.repository.full_name} is:pr is:merged")
+        issues = self.g.search_issues(query=f"repo:{self.repository.full_name} is:merged linked:issue")
         issuesList = []
         for issue in issues:
             issuesList.append(Issue(
