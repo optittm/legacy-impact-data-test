@@ -67,13 +67,13 @@ def find_repo(min_stars, lang, nb_repo):
 
     console = Console()
     table = Table(title="Repositories")
-    columns = ["FullName", "Stars", "Nb Issues", "Topics", "Url"]
+    columns = ["FullName", "Stars", "Issues", "Size", "Url"]
     for column in columns:
         table.add_column(column, justify="center")
     
     repos_data = githubFactory.find_repos(min_stars, lang, nb_repo)
     for data in repos_data:
-        table.add_row(data[0], data[1], data[2], data[3])
+        table.add_row(data[0], data[1], data[2], data[3], data[4])
     console.print(table)
 
 @click.command()
@@ -82,7 +82,7 @@ def find_repo(min_stars, lang, nb_repo):
 def get_data_repo(repository_name):
     """Fetches and stores data for a given GitHub repository.
 
-    Iterates through the issues and pull requests for the repository, 
+    Iterates through the pull  and pull requests for the repository, 
     fetching additional data like comments and modified files. Stores all
     the data in a local SQLite database for later analysis.
 
@@ -94,26 +94,18 @@ def get_data_repo(repository_name):
     repo = githubFactory.get_repository(repository_name)
     sqlite.database_insert(repo)
     
-    issuesList, issues = githubFactory.get_issues()
-    bar = IncrementalBar("Fetching data", max = len(issuesList))
-    for issue in issues:
+    pullList, pulls, issueNumbers = githubFactory.get_pull_requests()
+    bar = IncrementalBar("Fetching data", max = len(pullList))
+    for pull, pullItem, issueNumber in zip(pulls, pullList, issueNumbers):
         j += 1
         bar.next()
-        try:
-            pull_request, pull = githubFactory.get_pull_request(issue)
-            if not pull_request:
-                logging.info("Pull Request not merged for issue: " + str(issue.id))
-                continue
-        except:
-            logging.info("Error fetching pull request for the issue: " + str(issue.id))
-            continue
-        
-        logging.info("Pull Request merged for issue: " + str(issue.id))
-        sqlite.database_insert(issuesList[j])
-        sqlite.database_insert(pull_request)
+        sqlite.database_insert(pullItem)
+        issue, issueItem = githubFactory.get_issue(issueNumber)
+        sqlite.database_insert(issueItem)
+        sqlite.database_update_issueId_pullRequest(pullItem.githubId, issue.id)
         sqlite.database_insert_many(list(githubFactory.get_comments(issue)))
         sqlite.database_insert_many(list(githubFactory.get_modified_files(pull)))
-        logging.info("Committed data for issue: " + str(issue.id))
+        logging.info("Committed data for issue: " + str(pullItem.issueId))
     
     bar.finish()
 

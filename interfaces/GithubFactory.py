@@ -1,3 +1,5 @@
+import re
+
 from interfaces.AbcFactoryGit import AbcFactoryGit
 from models.repository import Repository
 from models.issue import Issue
@@ -11,26 +13,23 @@ class GithubFactory(AbcFactoryGit):
         self.g = g
         self.file_id = 0
     
-    def get_issues(self):
-        """Gets issues from the GitHub API.
+    def get_issue(self, number: int):
+        """Gets an issue from the Github API.
         
-        Searches for merged pull requests in the repository 
-        and yields Issue objects for each one.
+        Parameters:
+        number: The issue number.
         
-        Yields:
-            Issue: The issue with details and repository id."""
+        Returns:
+        A tuple containing the Github issue object and the local Issue model object."""
         
-        issues = self.g.search_issues(query=f"repo:{self.repository.full_name} is:merged linked:issue")
-        issuesList = []
-        for issue in issues:
-            issuesList.append(Issue(
-                githubId = issue.id,
-                title = issue.title,
-                body = issue.body,
-                state = issue.state,
-                repositoryId = self.repository.id
-            ))
-        return issuesList, issues
+        issue = self.repository.get_issue(number=number)
+        return issue, Issue(
+            githubId = issue.id,
+            title = issue.title,
+            body = issue.body,
+            state = issue.state,
+            repositoryId = self.repository.id
+        )
     
     def get_modified_files(self, pull: PullRequest):
         """Gets modified files from a pull request. 
@@ -58,33 +57,47 @@ class GithubFactory(AbcFactoryGit):
                 pullRequestId = pull.id
             )
     
-    def get_pull_request(self, issue: Issue):
-        """Gets a pull request from the GitHub API.
+    def get_pull_requests(self):
+        """Searches for merged pull requests linked to issues.
         
-        Iterates through the issues searching for merged pull requests. 
-        Checks if the pull request is merged, and returns a PullRequest object 
-        containing details of the pull request if it is merged, otherwise returns None.
-        
-        Parameters:
-            j (int): The index of the current issue being checked.
+        Iterates through merged pull requests, extracting linked issue ids. 
+        Creates PullRequest objects containing issue ids.
         
         Returns:
-            PullRequest: A PullRequest object containing pull request details if merged and it's issue id.
-            None: If the pull request is not merged."""
+            pullList: List of PullRequest objects
+            pulls: Raw search results"""
         
-        pullHtmlId = issue.pull_request.html_url.rsplit('/', 1)[-1]
-        pull = self.repository.get_pull(number = int(pullHtmlId))
-        if pull.is_merged():
-            return PullRequest(
+        pulls = []
+        issues = self.g.search_issues(query=f"repo:{self.repository.full_name} is:pr is:merged linked:issue")
+        for issue in issues:
+            pullHtmlId = issue.pull_request.html_url.rsplit('/', 1)[-1]
+            pull = self.repository.get_pull(number = int(pullHtmlId))
+            pulls.append(pull)
+        
+        pullList, issueNumbers = [], []
+        for pull in pulls:
+            title_ids = self.get_ids(pull.title)
+            body_ids = self.get_ids(pull.body)
+            comment_ids = []
+            for comment in pull.get_comments():
+                comment_ids.extend(self.get_ids(comment.body))
+            
+            if title_ids:
+                issueNumbers.append(int(title_ids[0]))
+            elif body_ids:
+                issueNumbers.append(int(body_ids[0]))
+            elif comment_ids:
+                issueNumbers.append(int(comment_ids[0]))
+            
+            pullList.append(PullRequest(
                 githubId = pull.id,
                 title = pull.title,
                 body = pull.body,
                 state = pull.state,
                 shaBase = pull.base.sha,
-                issueId = issue.id
-            ), pull
-        else:
-            return None
+                issueId = 0
+            ))
+        return pullList, pulls, issueNumbers
     
     def get_repository(self, repo_name: str):
         """Gets a GitHub repository object for the given repository name.
@@ -140,14 +153,38 @@ class GithubFactory(AbcFactoryGit):
             tuple: (name, stars, pulls, url) for each qualifying repo."""
         
         i = 0        
-        repos = self.g.search_repositories(query=f"stars:>={stars} language:{lang}")
+        repos = self.g.search_repositories(query=f"stars:>={stars} language:{lang} is:public")
         for repo in repos:
             yield(
                 repo.full_name,
                 str(repo.stargazers_count),
-                str(self.g.search_issues(query=f"repo:{repo.full_name} is:merged linked:issue").totalCount),
+                str(self.g.search_issues(query=f"repo:{repo.full_name} is:merged linked:issue").get_page(0).totalCount),
+                str(repo.size),
                 repo.html_url
             )
             i += 1
             if i == int(nb_repo):
                 break
+    
+    def get_ids(self, text):
+        """Gets issue ids from pr text.
+        
+        Parses the given text looking for references to issues in the forms of '#1234' or 'https://github.com/user/repo/issues/1234' and returns a list of the referenced ids.
+        
+        Parameters:
+            text: The text to parse for issue and PR ids.
+        
+        Returns:
+            A list of found issue and PR ids."""
+        
+        list_links = ["close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved"]
+        regex_simple_link = "\s+#(\d+)|".join(link.strip() for link in list_links) + "\s+#(\d+)"
+        regex_url_link = "\s+https?://[^/]+/[^/]+/[^/]+/[^/]+/([0-9]+)|".join(link.strip() for link in list_links) + "\s+https?://[^/]+/[^/]+/[^/]+/[^/]+/([0-9]+)"
+        ids = []
+        
+        for match in re.finditer(regex_simple_link + "|" + regex_url_link, text.lower()):
+            for group in match.groups():
+                if group is not None:
+                    ids.append(group)
+
+        return ids

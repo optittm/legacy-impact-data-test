@@ -4,7 +4,7 @@ from models.issue import Issue
 from models.pullRequest import PullRequest
 from models.modifiedFiles import ModifiedFiles
 from models.comment import Comment
-from sqlalchemy.sql.expression import func
+from sqlalchemy import update
 
 class SQLite(DbInterface):
     
@@ -32,4 +32,8 @@ class SQLite(DbInterface):
         Commits the changes to the database."""
     
         self.session.add_all(data)
+        self.session.commit()
+    
+    def database_update_issueId_pullRequest(self, pullId: int, issueId: int):
+        self.session.query(PullRequest).filter(PullRequest.githubId == pullId).update({"issueId": issueId})
         self.session.commit()
