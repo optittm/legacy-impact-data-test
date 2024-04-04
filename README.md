@@ -29,11 +29,13 @@ Every command has a --help option available to get more info on the current cli 
 ### Examples
 
 ```
-$ python main.py find-repo --lang Ruby
+$ python main.py find-repo --lang python --nb_repo 20
 ```
 ![Result](Example_find-repo.png)
 
 ```
 $ python main.py get-data-repo --repository_name "mojombo/chronic"
 ```
-Fetching data |████████████████████████████████| 72/72
+Fetching issues |████████████████████████████████| 41/41
+Fetching pulls |████████████████████████████████| 41/41
+Fetching data |████████████████████████████████| 34/34
