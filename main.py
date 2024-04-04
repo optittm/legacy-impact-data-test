@@ -95,7 +95,7 @@ def get_data_repo(repository_name):
     sqlite.database_insert(repo)
     
     pullList, pulls, issueNumbers = githubFactory.get_pull_requests()
-    bar = IncrementalBar("Fetching data", max = len(pullList))
+    bar = IncrementalBar("Fetching data", max = len(issueNumbers))
     for pull, pullItem, issueNumber in zip(pulls, pullList, issueNumbers):
         j += 1
         bar.next()

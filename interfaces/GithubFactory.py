@@ -1,3 +1,4 @@
+import logging
 import re
 
 from interfaces.AbcFactoryGit import AbcFactoryGit
@@ -6,6 +7,7 @@ from models.issue import Issue
 from models.pullRequest import PullRequest
 from models.modifiedFiles import ModifiedFiles
 from models.comment import Comment
+from progress.bar import IncrementalBar
 
 class GithubFactory(AbcFactoryGit):
     
@@ -69,15 +71,22 @@ class GithubFactory(AbcFactoryGit):
         
         pulls = []
         issues = self.g.search_issues(query=f"repo:{self.repository.full_name} is:pr is:merged linked:issue")
+        
+        issueBar = IncrementalBar("Fetching issues", max = issues.totalCount)
         for issue in issues:
+            issueBar.next()
             pullHtmlId = issue.pull_request.html_url.rsplit('/', 1)[-1]
             pull = self.repository.get_pull(number = int(pullHtmlId))
             pulls.append(pull)
+        issueBar.finish()
         
         pullList, issueNumbers = [], []
+        pullBar = IncrementalBar("Fetching pulls", max = len(pulls))
         for pull in pulls:
+            pullBar.next()
             title_ids = self.get_ids(pull.title)
-            body_ids = self.get_ids(pull.body)
+            if pull.body is not None:
+                body_ids = self.get_ids(pull.body)
             comment_ids = []
             for comment in pull.get_comments():
                 comment_ids.extend(self.get_ids(comment.body))
@@ -97,6 +106,7 @@ class GithubFactory(AbcFactoryGit):
                 shaBase = pull.base.sha,
                 issueId = 0
             ))
+        pullBar.finish()
         return pullList, pulls, issueNumbers
     
     def get_repository(self, repo_name: str):
