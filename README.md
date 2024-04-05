@@ -34,8 +34,8 @@ $ python main.py find-repo --lang python --nb_repo 20
 ![Result](Example_find-repo.png)
 
 ```
-$ python main.py get-data-repo --repository_name "mojombo/chronic"
+$ python main.py get-data-repo --repository_name "nvbn/thefuck"
 ```
-Fetching issues |████████████████████████████████| 41/41
-Fetching pulls |████████████████████████████████| 41/41
+Fetching issues |████████████████████████████████| 41/41\
+Fetching pulls |████████████████████████████████| 41/41\
 Fetching data |████████████████████████████████| 34/34
