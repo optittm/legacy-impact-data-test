@@ -90,7 +90,6 @@ def get_data_repo(repository_name):
         repository_name: The name of the GitHub repository to fetch data for."""
     
     j = -1
-    
     repo = githubFactory.get_repository(repository_name)
     sqlite.database_insert(repo)
     
@@ -99,12 +98,12 @@ def get_data_repo(repository_name):
     for pull, pullItem, issueNumber in zip(pulls, pullList, issueNumbers):
         j += 1
         bar.next()
-        sqlite.database_insert(pullItem)
+        newPullId = sqlite.database_insert(pullItem)
         issue, issueItem = githubFactory.get_issue(issueNumber)
-        sqlite.database_insert(issueItem)
-        sqlite.database_update_issueId_pullRequest(pullItem.githubId, issue.id)
-        sqlite.database_insert_many(list(githubFactory.get_comments(issue)))
-        sqlite.database_insert_many(list(githubFactory.get_modified_files(pull)))
+        newIssueId = sqlite.database_insert(issueItem)
+        sqlite.database_update_issueId_pullRequest(pullItem.githubId, newIssueId)
+        sqlite.database_insert_many(list(githubFactory.get_comments(issue, newIssueId)))
+        sqlite.database_insert_many(list(githubFactory.get_modified_files(pull, newPullId)))
         logging.info("Committed data for issue: " + str(pullItem.issueId))
     
     bar.finish()

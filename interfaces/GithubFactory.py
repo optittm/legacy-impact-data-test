@@ -33,7 +33,7 @@ class GithubFactory(AbcFactoryGit):
             repositoryId = self.repository.id
         )
     
-    def get_modified_files(self, pull: PullRequest):
+    def get_modified_files(self, pull: PullRequest, pullId: int):
         """Gets modified files from a pull request. 
         
         Iterates through the files modified in the pull request, assigns 
@@ -56,7 +56,7 @@ class GithubFactory(AbcFactoryGit):
                 additions = file.additions,
                 deletions = file.deletions,
                 changes = file.changes,
-                pullRequestId = pull.id
+                pullRequestId = pullId
             )
     
     def get_pull_requests(self):
@@ -84,12 +84,12 @@ class GithubFactory(AbcFactoryGit):
         pullBar = IncrementalBar("Fetching pulls", max = len(pulls))
         for pull in pulls:
             pullBar.next()
-            title_ids = self.get_ids(pull.title)
+            title_ids = self.__find_issues_ids_in_text(pull.title)
             if pull.body is not None:
-                body_ids = self.get_ids(pull.body)
+                body_ids = self.__find_issues_ids_in_text(pull.body)
             comment_ids = []
             for comment in pull.get_comments():
-                comment_ids.extend(self.get_ids(comment.body))
+                comment_ids.extend(self.__find_issues_ids_in_text(comment.body))
             
             if title_ids:
                 issueNumbers.append(int(title_ids[0]))
@@ -128,7 +128,7 @@ class GithubFactory(AbcFactoryGit):
             stars = self.repository.stargazers_count
         )
     
-    def get_comments(self, issue: Issue):
+    def get_comments(self, issue: Issue, issueId: int):
         """Gets the comments for the pull request associated with the issue at index j.
         
         Iterates through the comments for the issue and yields Comment objects containing 
@@ -145,7 +145,7 @@ class GithubFactory(AbcFactoryGit):
             yield Comment(
                 githubId = comment.id,
                 body = comment.body,
-                issueId = issue.id
+                issueId = issueId
             )
     
     def find_repos(self, stars, lang, nb_repo):
@@ -176,7 +176,7 @@ class GithubFactory(AbcFactoryGit):
             if i == int(nb_repo):
                 break
     
-    def get_ids(self, text):
+    def __find_issues_ids_in_text(self, text):
         """Gets issue ids from pr text.
         
         Parses the given text looking for references to issues in the forms of '#1234' or 'https://github.com/user/repo/issues/1234' and returns a list of the referenced ids.

@@ -21,6 +21,7 @@ class SQLite(DbInterface):
     
         self.session.add(data)
         self.session.commit()
+        return data.id
     
     def database_insert_many(self, data: list[Repository | Issue | PullRequest | ModifiedFiles | Comment]):
         """Inserts the given list of data objects into the database.
@@ -33,7 +34,14 @@ class SQLite(DbInterface):
     
         self.session.add_all(data)
         self.session.commit()
+        return [data.id for data in data]
     
     def database_update_issueId_pullRequest(self, pullId: int, issueId: int):
+        """Updates the issueId field of a PullRequest in the database.
+    
+        Parameters:
+            pullId (int): The GitHub ID of the pull request to update.
+            issueId (int): The new issue ID to set for the pull request."""
+    
         self.session.query(PullRequest).filter(PullRequest.githubId == pullId).update({"issueId": issueId})
         self.session.commit()
