@@ -31,7 +31,7 @@ Every command has a --help option available to get more info on the current cli 
 ```
 $ python main.py find-repo --lang python --nb_repo 20
 ```
-![Result](Example_find-repo.png)
+![Result](/assets/Example_find-repo.png)
 
 ```
 $ python main.py get-data-repo --repository_name "nvbn/thefuck"
