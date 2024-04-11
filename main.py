@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from models.db import setup_db
 from sqlalchemy.exc import ArgumentError
 
-logging.basicConfig(filename='logs.log', encoding='utf-8', level=logging.DEBUG)
+logging.basicConfig(filename='logs.log', level=logging.DEBUG)
 
 @inject
 def configure_session(container: Container):

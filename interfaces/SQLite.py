@@ -1,3 +1,4 @@
+from __future__ import annotations
 from interfaces.DbInterface import DbInterface
 from models.repository import Repository
 from models.issue import Issue
