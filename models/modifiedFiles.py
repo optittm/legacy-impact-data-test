@@ -4,12 +4,10 @@ from models.db import Base
 class ModifiedFiles(Base) :
     __tablename__ = "modifiedFiles"
     
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    sha = Column(String)
-    filename = Column(String)
+    gitFileId = Column(Integer, ForeignKey("gitFile.id"), primary_key=True)
+    pullRequestId = Column(Integer, ForeignKey("pullRequest.id"), primary_key=True)
     status = Column(String)
     patch = Column(String)
     additions = Column(Integer)
     deletions = Column(Integer)
     changes = Column(Integer)
-    pullRequestId = Column(Integer, ForeignKey("pullRequest.id"))

@@ -13,3 +13,7 @@ class DbInterface(ABC):
     @abstractmethod
     def database_update_issueId_pullRequest(self):
         raise NotImplementedError()
+    
+    @abstractmethod
+    def database_get_file_id_by_filename(self):
+        raise NotImplementedError()

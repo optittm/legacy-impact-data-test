@@ -7,13 +7,16 @@ from models.issue import Issue
 from models.pullRequest import PullRequest
 from models.modifiedFiles import ModifiedFiles
 from models.comment import Comment
+from models.gitFile import GitFile
 from progress.bar import IncrementalBar
+from progress.spinner import PixelSpinner
 
 class GithubFactory(AbcFactoryGit):
     
-    def __init__(self, g):
+    def __init__(self, g, db):
         self.g = g
         self.file_id = 0
+        self.db = db
     
     def get_issue(self, number: int):
         """Gets an issue from the Github API.
@@ -49,14 +52,13 @@ class GithubFactory(AbcFactoryGit):
         files = pull.get_files()
         for file in files:
             yield ModifiedFiles(
-                sha = file.sha,
-                filename = file.filename,
+                gitFileId = self.db.database_get_file_id_by_filename(file.filename, self.repository.id),
+                pullRequestId = pullId,
                 status = file.status,
                 patch = file.patch,
                 additions = file.additions,
                 deletions = file.deletions,
-                changes = file.changes,
-                pullRequestId = pullId
+                changes = file.changes
             )
     
     def get_pull_requests(self):
@@ -147,6 +149,28 @@ class GithubFactory(AbcFactoryGit):
                 body = comment.body,
                 issueId = issueId
             )
+    
+    def get_gitFile(self):
+        """Recursively fetches all files in the repository, yielding a GitFile object for each file.
+        
+        The method uses a PixelSpinner to provide visual feedback while fetching the files.
+        It first gets the contents of the repository root directory, then recursively fetches the contents of any subdirectories.
+        For each file, it yields a GitFile object containing the file's SHA, file name, and repository ID."""
+        
+        contents = self.repository.get_contents("")
+        contentSpinner = PixelSpinner("Fetching files ")
+        while contents:
+            contentSpinner.next()
+            file = contents.pop(0)
+            if file.type == "dir":
+                contents.extend(self.repository.get_contents(file.path))
+            else:
+                yield GitFile(
+                    sha = file.sha,
+                    fileName = file.path,
+                    repositoryId = self.repository.id
+                )
+        contentSpinner.finish()
     
     def find_repos(self, stars, lang, nb_repo):
         """Searches GitHub repositories based on stars, language, and number of repos.

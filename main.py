@@ -31,16 +31,17 @@ def configure_session(container: Container):
     container.session.override(
         providers.Singleton(Session)
     )
-    container.git_factory.override(
-        providers.Factory(
-            GithubFactory,
-            g = Github(auth=Auth.Token(os.getenv('GITHUB_TOKEN')))
-        )
-    )
     container.db_interface.override(
         providers.Singleton(
             SQLite,
             session = container.session
+        )
+    )
+    container.git_factory.override(
+        providers.Factory(
+            GithubFactory,
+            g = Github(auth=Auth.Token(os.getenv('GITHUB_TOKEN'))),
+            db = container.db_interface
         )
     )
 
@@ -90,8 +91,8 @@ def get_data_repo(repository_name):
         repository_name: The name of the GitHub repository to fetch data for."""
     
     j = -1
-    repo = githubFactory.get_repository(repository_name)
-    sqlite.database_insert(repo)
+    sqlite.database_insert(githubFactory.get_repository(repository_name))
+    sqlite.database_insert_many(list(githubFactory.get_gitFile()))
     
     pullList, pulls, issueNumbers = githubFactory.get_pull_requests()
     bar = IncrementalBar("Fetching data", max = len(issueNumbers))
@@ -115,7 +116,7 @@ if __name__ == "__main__":
     container = Container()
     configure_session(container)
     
-    githubFactory = container.git_factory()
     sqlite = container.db_interface()
+    githubFactory = container.git_factory()
     
     cli()
