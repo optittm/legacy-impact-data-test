@@ -1,5 +1,4 @@
 from __future__ import annotations
-import logging
 from interfaces.DbInterface import DbInterface
 from models.repository import Repository
 from models.issue import Issue
@@ -7,6 +6,7 @@ from models.pullRequest import PullRequest
 from models.modifiedFiles import ModifiedFiles
 from models.gitFile import GitFile
 from models.comment import Comment
+from models.testResult import TestResult
 from sqlalchemy import update, select
 
 class SQLite(DbInterface):
@@ -15,7 +15,7 @@ class SQLite(DbInterface):
         self.session = session
         self.missingFileId = 0
     
-    def database_insert(self, data: Repository | Issue | PullRequest | ModifiedFiles | Comment):
+    def insert(self, data: Repository | Issue | PullRequest | TestResult):
         """Inserts the given data object into the database.
         
         Parameters:
@@ -27,7 +27,7 @@ class SQLite(DbInterface):
         self.session.commit()
         return data.id
     
-    def database_insert_many(self, data: list[Repository | Issue | PullRequest | ModifiedFiles | Comment]):
+    def insert_many(self, data: list[ModifiedFiles | Comment | GitFile]):
         """Inserts the given list of data objects into the database.
         
         Parameters:
@@ -41,17 +41,17 @@ class SQLite(DbInterface):
         if not all(isinstance(x, ModifiedFiles) for x in data):
             return [data.id for data in data]
     
-    def database_update_issueId_pullRequest(self, pullId: int, issueId: int):
+    def update_issueId_pullRequest(self, pullId: int, issueId: int):
         """Updates the issueId field of a PullRequest in the database.
     
         Parameters:
             pullId (int): The GitHub ID of the pull request to update.
             issueId (int): The new issue ID to set for the pull request."""
     
-        self.session.query(PullRequest).filter(PullRequest.githubId == pullId).update({"issueId": issueId})
-        self.session.commit()
+        stmt = update(PullRequest).where(PullRequest.githubId == pullId).values(issueId = issueId)
+        self.session.execute(stmt)
     
-    def database_get_file_id_by_filename(self, filename: str, repoId: int):
+    def get_file_id_by_filename(self, filename: str, repoId: int):
         """Retrieves the database ID of a file by its filename and repository ID.
         
         Parameters:
@@ -67,3 +67,11 @@ class SQLite(DbInterface):
         except:
             self.missingFileId -= 1
             return self.missingFileId # Return a dummy value if file not found
+    
+    def get_shas_texts_and_issueId(self, repositoryName: str):
+        stmt = select(Issue.title, Issue.body, PullRequest.shaBase, Issue.id).where(PullRequest.issueId == Issue.id).where(Issue.repositoryId == self.get_repoId_from_repoName(repositoryName))
+        return(self.session.execute(stmt).fetchall())
+    
+    def get_repoId_from_repoName(self, repositoryName: str):
+        stmt = select(Repository.id).where(Repository.fullName == repositoryName)
+        return(self.session.execute(stmt).fetchone()[0])

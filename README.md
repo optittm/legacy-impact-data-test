@@ -2,7 +2,7 @@
 
 ## Installation
 
-Create a [virtual environnement](https://docs.python.org/3/library/venv.html) and add all the dependencies needed :
+Create a [virtual environnement](https://docs.python.org/3/library/venv.html) and add all the dependencies needed with a python version of 3.8:
 ```
 $ python -m venv c:\path\to\myenv
 $ pip install -r requirements.txt
@@ -36,6 +36,7 @@ $ python main.py find-repo --lang python --nb_repo 20
 ```
 $ python main.py get-data-repo --repository_name "nvbn/thefuck"
 ```
+Fetching files ⣾
 Fetching issues |████████████████████████████████| 41/41\
 Fetching pulls |████████████████████████████████| 41/41\
 Fetching data |████████████████████████████████| 34/34

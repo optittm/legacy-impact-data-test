@@ -52,7 +52,7 @@ class GithubFactory(AbcFactoryGit):
         files = pull.get_files()
         for file in files:
             yield ModifiedFiles(
-                gitFileId = self.db.database_get_file_id_by_filename(file.filename, self.repository.id),
+                gitFileId = self.db.get_file_id_by_filename(file.filename, self.repository.id),
                 pullRequestId = pullId,
                 status = file.status,
                 patch = file.patch,

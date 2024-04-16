@@ -4,16 +4,18 @@ import click
 import sqlalchemy as db
 
 from github import Github, Auth
-from rich.console import Console
 from rich.table import Table
+from rich.console import Console
+from progress.bar import IncrementalBar
+from interfaces.CodeT5 import CodeT5
 from interfaces.SQLite import SQLite
+from interfaces.GithubFactory import GithubFactory
 from utils.containers import Container, providers
 from dependency_injector.wiring import inject
-from interfaces.GithubFactory import GithubFactory
-from progress.bar import IncrementalBar
 from sqlalchemy.orm import sessionmaker
-from models.db import setup_db
 from sqlalchemy.exc import ArgumentError
+from models.testResult import TestResult
+from models.db import setup_db
 
 logging.basicConfig(filename='logs.log', level=logging.DEBUG)
 
@@ -42,6 +44,12 @@ def configure_session(container: Container):
             GithubFactory,
             g = Github(auth=Auth.Token(os.getenv('GITHUB_TOKEN'))),
             db = container.db_interface
+        )
+    )
+    container.semantic_test.override(
+        providers.Factory(
+            CodeT5,
+            repoFullName = os.getenv('REPOSITORY_NAME')
         )
     )
 
@@ -91,24 +99,37 @@ def get_data_repo(repository_name):
         repository_name: The name of the GitHub repository to fetch data for."""
     
     j = -1
-    sqlite.database_insert(githubFactory.get_repository(repository_name))
-    sqlite.database_insert_many(list(githubFactory.get_gitFile()))
+    sqlite.insert(githubFactory.get_repository(repository_name))
+    sqlite.insert_many(list(githubFactory.get_gitFile()))
     
     pullList, pulls, issueNumbers = githubFactory.get_pull_requests()
     bar = IncrementalBar("Fetching data", max = len(issueNumbers))
     for pull, pullItem, issueNumber in zip(pulls, pullList, issueNumbers):
         j += 1
         bar.next()
-        newPullId = sqlite.database_insert(pullItem)
+        newPullId = sqlite.insert(pullItem)
         issue, issueItem = githubFactory.get_issue(issueNumber)
-        newIssueId = sqlite.database_insert(issueItem)
-        sqlite.database_update_issueId_pullRequest(pullItem.githubId, newIssueId)
-        sqlite.database_insert_many(list(githubFactory.get_comments(issue, newIssueId)))
-        sqlite.database_insert_many(list(githubFactory.get_modified_files(pull, newPullId)))
+        newIssueId = sqlite.insert(issueItem)
+        sqlite.update_issueId_pullRequest(pullItem.githubId, newIssueId)
+        sqlite.insert_many(list(githubFactory.get_comments(issue, newIssueId)))
+        sqlite.insert_many(list(githubFactory.get_modified_files(pull, newPullId)))
         logging.info("Committed data for issue: " + str(pullItem.issueId))
     
     bar.finish()
 
+@click.command()
+@click.option('--repository_name', envvar='REPOSITORY_NAME', default=os.getenv('REPOSITORY_NAME'), help='Name of the repository')
+@inject
+def semantic_test_repo(repository_name):
+    text_and_shas = sqlite.get_shas_texts_and_issueId(repository_name)
+    for title, body, sha, issueId in text_and_shas:
+        semantic.create_test_repo(sha)
+        results = semantic.test_issue(title.join(', ' + body))
+        fileId = sqlite.get_file_id_by_filename(results[0], sqlite.get_repoId_from_repoName(repository_name))
+        testResult = TestResult(score = results[1], issueId = issueId, gitFileId = fileId)
+        sqlite.insert(testResult)
+
+cli.add_command(semantic_test_repo)
 cli.add_command(get_data_repo)
 cli.add_command(find_repo)
 
@@ -118,5 +139,6 @@ if __name__ == "__main__":
     
     sqlite = container.db_interface()
     githubFactory = container.git_factory()
+    semantic = container.semantic_test()
     
     cli()

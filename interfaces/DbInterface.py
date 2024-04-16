@@ -3,17 +3,25 @@ from abc import ABC, abstractmethod
 class DbInterface(ABC):
     
     @abstractmethod
-    def database_insert(self):
+    def insert(self):
         raise NotImplementedError()
     
     @abstractmethod
-    def database_insert_many(self):
+    def insert_many(self):
         raise NotImplementedError()
     
     @abstractmethod
-    def database_update_issueId_pullRequest(self):
+    def update_issueId_pullRequest(self):
         raise NotImplementedError()
     
     @abstractmethod
-    def database_get_file_id_by_filename(self):
+    def get_file_id_by_filename(self):
+        raise NotImplementedError()
+    
+    @abstractmethod
+    def get_shas_texts_and_issueId(self):
+        raise NotImplementedError()
+    
+    @abstractmethod
+    def get_repoId_from_repoName(self):
         raise NotImplementedError()
