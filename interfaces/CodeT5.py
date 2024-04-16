@@ -22,6 +22,13 @@ class CodeT5(SemanticTest):
         self.bert = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
     
     def test_issue(self, text_issue):
+        """Finds the file and maximum semantic similarity score for a given issue text.
+        
+        Parameters:
+            text_issue (str): The text of the issue to find the most similar code for.
+        
+        Returns:
+            Tuple[str, float]: The relative file path of the most similar code and the maximum semantic similarity score."""
         text = text_issue
         file = ''
         max_similitude = float('-inf')
@@ -56,9 +63,14 @@ class CodeT5(SemanticTest):
         function_bar2.finish()
         match = re.search(regex_real_file_path, file)
         return match.group(1).replace("\\", "/"), max_similitude.item()
-        # print(f"Le fichier qui match le plus est {match.group(1)} avec une sim cos de {max_similitude}")
     
     def create_test_repo(self, shaBase):
+        """Creates a test repository by cloning the repository specified by `self.repoFullName` and checking out the base commit specified by `shaBase`.
+        
+        If the test repository directory does not exist, it will be created under the `./test` directory. The repository will then be cloned from the specified URL and the base commit will be checked out.
+        
+        Parameters:
+            shaBase (str): The commit hash of the base commit to check out in the test repository."""
         if not os.path.exists(self.path_repos):
             if not os.path.exists("./test"):
                 os.mkdir("./test")
@@ -67,6 +79,9 @@ class CodeT5(SemanticTest):
         os.system(f"cd {self.path_repos} && git checkout {shaBase}")
     
     def __embed_code(self):
+        """Recursively walks through the repository directory and extracts the source code of all Python functions found in the files.
+    
+        The extracted function source code is stored in the `self.functions_sources` list, where each element is a list containing the file path and the function source code."""
         for root, dirs, files in os.walk(self.path_repos):
             for file in files:
                 if file.endswith(".py"):
@@ -87,7 +102,14 @@ class CodeT5(SemanticTest):
                                 file_path,
                                 function
                             ])
-
+    
     def __extract_function_source(self, node):
+        """Extracts the source code of a Python function from an AST node.
+        
+        Args:
+            node (ast.FunctionDef): The AST node representing the function definition.
+        
+        Returns:
+            str: The source code of the function."""
         if isinstance(node, ast.FunctionDef):
             return astunparse.unparse(node)

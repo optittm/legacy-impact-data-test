@@ -150,7 +150,7 @@ class GithubFactory(AbcFactoryGit):
                 issueId = issueId
             )
     
-    def get_gitFile(self):
+    def get_gitFiles(self):
         """Recursively fetches all files in the repository, yielding a GitFile object for each file.
         
         The method uses a PixelSpinner to provide visual feedback while fetching the files.

@@ -23,5 +23,5 @@ class AbcFactoryGit(ABC):
         raise NotImplementedError()
     
     @abstractmethod
-    def get_gitFile(self):
+    def get_gitFiles(self):
         raise NotImplementedError()

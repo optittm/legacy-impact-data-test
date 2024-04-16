@@ -69,9 +69,24 @@ class SQLite(DbInterface):
             return self.missingFileId # Return a dummy value if file not found
     
     def get_shas_texts_and_issueId(self, repositoryName: str):
+        """Retrieves the title, body, base SHA, and issue ID for pull requests associated with a given repository.
+    
+        Parameters:
+            repositoryName (str): The name of the repository to retrieve data for.
+        
+        Returns:
+            list[tuple[str, str, str, int]]: A list of tuples containing the pull request title, body, base SHA, and issue ID."""
         stmt = select(Issue.title, Issue.body, PullRequest.shaBase, Issue.id).where(PullRequest.issueId == Issue.id).where(Issue.repositoryId == self.get_repoId_from_repoName(repositoryName))
         return(self.session.execute(stmt).fetchall())
     
+    
     def get_repoId_from_repoName(self, repositoryName: str):
+        """Retrieves the database ID of a repository by its full name.
+    
+        Parameters:
+            repositoryName (str): The full name of the repository to retrieve the ID for.
+        
+        Returns:
+            int: The database ID of the repository."""
         stmt = select(Repository.id).where(Repository.fullName == repositoryName)
         return(self.session.execute(stmt).fetchone()[0])
