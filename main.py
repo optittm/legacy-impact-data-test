@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import ArgumentError
 from models.testResult import TestResult
 from models.db import setup_db
+from timeit import default_timer
 
 logging.basicConfig(filename='logs.log', level=logging.DEBUG)
 
@@ -122,12 +123,17 @@ def get_data_repo(repository_name):
 @inject
 def semantic_test_repo(repository_name):
     text_and_shas = sqlite.get_shas_texts_and_issueId(repository_name)
+    durations = []
     for title, body, sha, issueId in text_and_shas:
+        start = default_timer()
         semantic.create_test_repo(sha)
         results = semantic.test_issue(title.join(', ' + body))
         fileId = sqlite.get_file_id_by_filename(results[0], sqlite.get_repoId_from_repoName(repository_name))
         testResult = TestResult(score = results[1], issueId = issueId, gitFileId = fileId)
         sqlite.insert(testResult)
+        end = default_timer()
+        durations.append(end - start)
+    logging.info(durations)
 
 cli.add_command(semantic_test_repo)
 cli.add_command(get_data_repo)
