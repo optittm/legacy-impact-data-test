@@ -192,10 +192,12 @@ class GithubFactory(AbcFactoryGit):
         i = 0        
         repos = self.g.search_repositories(query=f"stars:>={stars} language:{lang} is:public")
         for repo in repos:
+            totalIssues = self.g.search_issues(query=f"repo:{repo.full_name} is:merged linked:issue")
+            totalIssues.get_page(0)
             yield(
                 repo.full_name,
                 str(repo.stargazers_count),
-                str(self.g.search_issues(query=f"repo:{repo.full_name} is:merged linked:issue").totalCount),
+                str(totalIssues.totalCount),
                 str(repo.size),
                 repo.html_url
             )
