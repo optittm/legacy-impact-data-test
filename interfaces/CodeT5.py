@@ -1,4 +1,5 @@
 import ast
+import logging
 import astunparse
 import os
 import re
@@ -37,7 +38,7 @@ class CodeT5(SemanticTest):
         self.functions_sources = []
         
         self.__embed_code()
-        
+
         function_bar = IncrementalBar(f"Generating semantic token ", max=len(self.functions_sources))
         for function_source in self.functions_sources:
             function_bar.next()
@@ -45,12 +46,7 @@ class CodeT5(SemanticTest):
             
             generated_ids = self.codeT5.generate(input_ids, max_length=20)
             function_source.append(self.tokenizer.decode(generated_ids[0], skip_special_tokens=True))
-        
-        function_bar.finish()
-        function_bar2 = IncrementalBar(f"Computing semantic similarity ", max=len(self.functions_sources))
-        
-        for function_source in self.functions_sources:
-            function_bar2.next()
+
             sentences = [text, function_source[2]]
             
             #Compute embedding for both lists
@@ -60,8 +56,8 @@ class CodeT5(SemanticTest):
             if max_similitude < util.pytorch_cos_sim(embedding_1, embedding_2):
                 max_similitude = util.pytorch_cos_sim(embedding_1, embedding_2)
                 file = function_source[0]
-        
-        function_bar2.finish()
+
+        function_bar.finish()
         match = re.search(regex_real_file_path, file)
         return match.group(1).replace("\\", "/"), max_similitude.item()
     
