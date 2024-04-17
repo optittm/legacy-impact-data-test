@@ -26,8 +26,11 @@ class GithubFactory(AbcFactoryGit):
         
         Returns:
         A tuple containing the Github issue object and the local Issue model object."""
-        
-        issue = self.repository.get_issue(number=number)
+        try:
+            issue = self.repository.get_issue(number=number)
+        except:
+            logging.exception(f"Could not find Issue with ID : {number}")
+            return 0, 0
         return issue, Issue(
             githubId = issue.id,
             title = issue.title,

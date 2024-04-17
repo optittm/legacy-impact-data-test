@@ -49,8 +49,7 @@ def configure_session(container: Container):
     )
     container.semantic_test.override(
         providers.Factory(
-            CodeT5,
-            repoFullName = os.getenv('REPOSITORY_NAME')
+            CodeT5
         )
     )
 
@@ -108,8 +107,10 @@ def get_data_repo(repository_name):
     for pull, pullItem, issueNumber in zip(pulls, pullList, issueNumbers):
         j += 1
         bar.next()
-        newPullId = sqlite.insert(pullItem)
         issue, issueItem = githubFactory.get_issue(issueNumber)
+        if issue == 0 and issueItem == 0:
+            continue
+        newPullId = sqlite.insert(pullItem)
         newIssueId = sqlite.insert(issueItem)
         sqlite.update_issueId_pullRequest(pullItem.githubId, newIssueId)
         sqlite.insert_many(list(githubFactory.get_comments(issue, newIssueId)))
@@ -124,6 +125,7 @@ def get_data_repo(repository_name):
 def semantic_test_repo(repository_name):
     text_and_shas = sqlite.get_shas_texts_and_issueId(repository_name)
     durations = []
+    semantic.init_repo(repository_name)
     for title, body, sha, issueId in text_and_shas:
         start = default_timer()
         semantic.create_test_repo(sha)

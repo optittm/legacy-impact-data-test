@@ -10,16 +10,17 @@ from progress.bar import IncrementalBar
 
 class CodeT5(SemanticTest):
     
-    def __init__(self, repoFullName):
-        self.repoFullName = repoFullName
-        self.repoName = self.repoFullName.split("/")[-1]
-        self.path_repos = f"./test/{self.repoName}"
-        
+    def __init__(self):
         checkpoint = "Salesforce/codet5p-220m-bimodal"
-        self.device = "cpu" #or "cuda"
+        self.device = "cuda" # "cpu" or "cuda"
         self.tokenizer = AutoTokenizer.from_pretrained(checkpoint, trust_remote_code=True)
         self.codeT5 = AutoModel.from_pretrained(checkpoint, trust_remote_code=True).to(self.device)
         self.bert = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+    
+    def init_repo(self, repoFullName):
+        self.repoFullName = repoFullName
+        self.repoName = self.repoFullName.split("/")[-1]
+        self.path_repos = f"./test/{self.repoName}"
     
     def test_issue(self, text_issue):
         """Finds the file and maximum semantic similarity score for a given issue text.
