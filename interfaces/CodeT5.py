@@ -3,6 +3,7 @@ import logging
 import astunparse
 import os
 import re
+import torch
 
 from interfaces.SemanticTest import SemanticTest
 from sentence_transformers import SentenceTransformer, util
@@ -42,20 +43,32 @@ class CodeT5(SemanticTest):
         function_bar = IncrementalBar(f"Generating semantic token ", max=len(self.functions_sources))
         for function_source in self.functions_sources:
             function_bar.next()
-            input_ids = self.tokenizer(function_source[1], return_tensors="pt").input_ids.to(self.device)
-            
-            generated_ids = self.codeT5.generate(input_ids, max_length=20)
-            function_source.append(self.tokenizer.decode(generated_ids[0], skip_special_tokens=True))
+            if len(function_source[1]) > 24800:
+                logging.info(f"a function in {function_source[0]} was skipped because it's too big !")
+                continue
+            try:
+                input_ids = self.tokenizer(function_source[1], return_tensors="pt").input_ids.to(self.device)
+                
+                generated_ids = self.codeT5.generate(input_ids, max_length=20)
+                function_source.append(self.tokenizer.decode(generated_ids[0], skip_special_tokens=True))
 
-            sentences = [text, function_source[2]]
-            
-            #Compute embedding for both lists
-            embedding_1= self.bert.encode(sentences[0], convert_to_tensor=True)
-            embedding_2 = self.bert.encode(sentences[1], convert_to_tensor=True)
-            
-            if max_similitude < util.pytorch_cos_sim(embedding_1, embedding_2):
-                max_similitude = util.pytorch_cos_sim(embedding_1, embedding_2)
-                file = function_source[0]
+                sentences = [text, function_source[2]]
+                
+                #Compute embedding for both lists
+                embedding_1= self.bert.encode(sentences[0], convert_to_tensor=True)
+                embedding_2 = self.bert.encode(sentences[1], convert_to_tensor=True)
+                
+                if max_similitude < util.pytorch_cos_sim(embedding_1, embedding_2):
+                    max_similitude = util.pytorch_cos_sim(embedding_1, embedding_2)
+                    file = function_source[0]
+                
+                torch.cuda.empty_cache()
+                
+            except:
+                file_functions = open("FunctionsToAvoid.txt", "a")
+                file_functions.write(function_source[1])
+                torch.cuda.empty_cache()
+                os.system(".venv\\Scripts\\activate.bat && python main.py semantic-test-repo")
 
         function_bar.finish()
         match = re.search(regex_real_file_path, file)
