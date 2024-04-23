@@ -3,13 +3,9 @@ from abc import ABC, abstractmethod
 class SemanticTest(ABC):
     
     @abstractmethod
-    def test_issue(self):
+    def get_max_file_score_from_issue(self, text_issue : str):
         raise NotImplementedError()
     
     @abstractmethod
-    def create_test_repo(self):
-        raise NotImplementedError()
-    
-    @abstractmethod
-    def init_repo(self):
+    def init_repo(self, repoFullName: str):
         raise NotImplementedError()

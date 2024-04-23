@@ -1,5 +1,6 @@
 import logging
 import re
+import os
 
 from interfaces.AbcFactoryGit import AbcFactoryGit
 from models.repository import Repository
@@ -175,7 +176,7 @@ class GithubFactory(AbcFactoryGit):
                 )
         contentSpinner.finish()
     
-    def find_repos(self, stars, lang, nb_repo):
+    def find_repos(self, stars: int, lang: str, nb_repo: int):
         """Searches GitHub repositories based on stars, language, and number of repos.
         
         Iterates through paginated search results up to the specified number of repos. 
@@ -204,6 +205,20 @@ class GithubFactory(AbcFactoryGit):
             i += 1
             if i == int(nb_repo):
                 break
+    
+    def create_test_repo(self, shaBase, repoFullName: str, path_repos: str):
+        """Creates a test repository by cloning the repository specified by `self.repoFullName` and checking out the base commit specified by `shaBase`.
+        
+        If the test repository directory does not exist, it will be created under the `./test` directory. The repository will then be cloned from the specified URL and the base commit will be checked out.
+        
+        Parameters:
+            shaBase : The commit hash of the base commit to check out in the test repository."""
+        if not os.path.exists(path_repos):
+            if not os.path.exists("./test"):
+                os.mkdir("./test")
+            os.system(f"cd ./test && git clone https://github.com/{repoFullName}")
+        
+        os.system(f"cd {path_repos} && git checkout {shaBase}")
     
     def __find_issues_ids_in_text(self, text):
         """Gets issue ids from pr text.

@@ -8,6 +8,7 @@ from models.gitFile import GitFile
 from models.comment import Comment
 from models.testResult import TestResult
 from sqlalchemy import update, select
+from typing import List
 
 class SQLite(DbInterface):
     
@@ -27,7 +28,7 @@ class SQLite(DbInterface):
         self.session.commit()
         return data.id
     
-    def insert_many(self, data: list[ModifiedFiles | Comment | GitFile]):
+    def insert_many(self, data: List[ModifiedFiles | Comment | GitFile]):
         """Inserts the given list of data objects into the database.
         
         Parameters:

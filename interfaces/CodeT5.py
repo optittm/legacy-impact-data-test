@@ -14,17 +14,17 @@ class CodeT5(SemanticTest):
     
     def __init__(self):
         checkpoint = "Salesforce/codet5p-220m-bimodal"
-        self.device = "cuda" # "cpu" or "cuda"
+        self.device = os.getenv("DEVICE")
         self.tokenizer = AutoTokenizer.from_pretrained(checkpoint, trust_remote_code=True)
         self.codeT5 = AutoModel.from_pretrained(checkpoint, trust_remote_code=True).to(self.device)
-        self.bert = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+        self.bert = SentenceTransformer(os.getenv('SENTENCE_TRANSFORMER'))
     
-    def init_repo(self, repoFullName):
-        self.repoFullName = repoFullName
-        self.repoName = self.repoFullName.split("/")[-1]
+    def init_repo(self, repoFullName: str):
+        self.repoName = repoFullName.split("/")[-1]
         self.path_repos = f"./test/{self.repoName}"
+        return self.path_repos
     
-    def test_issue(self, text_issue):
+    def get_max_file_score_from_issue(self, text_issue: str):
         """Finds the file and maximum semantic similarity score for a given issue text.
         
         Parameters:
@@ -73,20 +73,6 @@ class CodeT5(SemanticTest):
         function_bar.finish()
         match = re.search(regex_real_file_path, file)
         return match.group(1).replace("\\", "/"), max_similitude.item()
-    
-    def create_test_repo(self, shaBase):
-        """Creates a test repository by cloning the repository specified by `self.repoFullName` and checking out the base commit specified by `shaBase`.
-        
-        If the test repository directory does not exist, it will be created under the `./test` directory. The repository will then be cloned from the specified URL and the base commit will be checked out.
-        
-        Parameters:
-            shaBase (str): The commit hash of the base commit to check out in the test repository."""
-        if not os.path.exists(self.path_repos):
-            if not os.path.exists("./test"):
-                os.mkdir("./test")
-            os.system(f"cd ./test && git clone https://github.com/{self.repoFullName}")
-        
-        os.system(f"cd {self.path_repos} && git checkout {shaBase}")
     
     def __embed_code(self):
         """Recursively walks through the repository directory and extracts the source code of all Python functions found in the files.
