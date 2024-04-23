@@ -17,6 +17,7 @@ from sqlalchemy.exc import ArgumentError
 from models.testResult import TestResult
 from models.db import setup_db
 from timeit import default_timer
+from utils.missingFileException import MissingFileException
 
 logging.basicConfig(filename='logs.log', level=logging.DEBUG)
 
@@ -128,11 +129,17 @@ def semantic_test_repo(repository_name):
     path = semantic.init_repo(repository_name)
     for title, body, sha, issueId in text_and_shas:
         start = default_timer()
+        
         githubFactory.create_test_repo(sha, repository_name, path)
         results = semantic.get_max_file_score_from_issue(title.join(', ' + body))
-        fileId = sqlite.get_file_id_by_filename(results[0], sqlite.get_repoId_from_repoName(repository_name))
+        try: fileId = sqlite.get_file_id_by_filename(results[0], sqlite.get_repoId_from_repoName(repository_name))
+        except MissingFileException:
+            logging.warning(f"No file found with name {results[0]} in repo {repository_name}")
+            fileId = 0
         testResult = TestResult(score = results[1], issueId = issueId, gitFileId = fileId)
+        
         sqlite.insert(testResult)
+        
         end = default_timer()
         durations.append(end - start)
     logging.info(durations)

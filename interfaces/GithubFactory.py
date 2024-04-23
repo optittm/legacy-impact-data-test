@@ -11,6 +11,7 @@ from models.comment import Comment
 from models.gitFile import GitFile
 from progress.bar import IncrementalBar
 from progress.spinner import PixelSpinner
+from utils.missingFileException import MissingFileException
 
 class GithubFactory(AbcFactoryGit):
     
@@ -55,8 +56,17 @@ class GithubFactory(AbcFactoryGit):
         
         files = pull.get_files()
         for file in files:
+            try:
+                fileId = self.db.get_file_id_by_filename(file.filename, self.repository.id)
+            except MissingFileException:
+                fileId = self.db.insert(GitFile(
+                    sha = file.sha,
+                    fileName = file.filename,
+                    repositoryId = self.repository.id
+                ))
+            
             yield ModifiedFiles(
-                gitFileId = self.db.get_file_id_by_filename(file.filename, self.repository.id),
+                gitFileId = fileId,
                 pullRequestId = pullId,
                 status = file.status,
                 patch = file.patch,

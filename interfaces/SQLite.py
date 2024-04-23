@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 from interfaces.DbInterface import DbInterface
 from models.repository import Repository
 from models.issue import Issue
@@ -9,14 +10,14 @@ from models.comment import Comment
 from models.testResult import TestResult
 from sqlalchemy import update, select
 from typing import List
+from utils.missingFileException import MissingFileException
 
 class SQLite(DbInterface):
     
     def __init__(self, session):
         self.session = session
-        self.missingFileId = 0
     
-    def insert(self, data: Repository | Issue | PullRequest | TestResult):
+    def insert(self, data: Repository | Issue | PullRequest | TestResult | GitFile):
         """Inserts the given data object into the database.
         
         Parameters:
@@ -63,11 +64,10 @@ class SQLite(DbInterface):
             int: The database ID of the file, or a dummy value if the file is not found."""
         
         stmt = select(GitFile.id).where(GitFile.fileName == filename).where(GitFile.repositoryId == repoId)
-        try: 
-            return self.session.execute(stmt).fetchone()[0]
-        except:
-            self.missingFileId -= 1
-            return self.missingFileId # Return a dummy value if file not found
+        fileId = self.session.execute(stmt).fetchone()
+        if fileId == None:
+            raise MissingFileException(filename)
+        return fileId[0]
     
     def get_shas_texts_and_issueId(self, repositoryName: str):
         """Retrieves the title, body, base SHA, and issue ID for pull requests associated with a given repository.

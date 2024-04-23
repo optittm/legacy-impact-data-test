@@ -1,3 +1,4 @@
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from models.comment import Comment
 from models.gitFile import GitFile
@@ -11,7 +12,7 @@ from typing import List
 class DbInterface(ABC):
     
     @abstractmethod
-    def insert(self, data: Repository | Issue | PullRequest | TestResult):
+    def insert(self, data: Repository | Issue | PullRequest | TestResult | GitFile):
         raise NotImplementedError()
     
     @abstractmethod
