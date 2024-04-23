@@ -125,11 +125,11 @@ def get_data_repo(repository_name):
 def semantic_test_repo(repository_name):
     text_and_shas = sqlite.get_shas_texts_and_issueId(repository_name)
     durations = []
-    semantic.init_repo(repository_name)
+    path = semantic.init_repo(repository_name)
     for title, body, sha, issueId in text_and_shas:
         start = default_timer()
-        semantic.create_test_repo(sha)
-        results = semantic.test_issue(title.join(', ' + body))
+        githubFactory.create_test_repo(sha, repository_name, path)
+        results = semantic.get_max_file_score_from_issue(title.join(', ' + body))
         fileId = sqlite.get_file_id_by_filename(results[0], sqlite.get_repoId_from_repoName(repository_name))
         testResult = TestResult(score = results[1], issueId = issueId, gitFileId = fileId)
         sqlite.insert(testResult)

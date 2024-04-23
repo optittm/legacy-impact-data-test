@@ -23,6 +23,8 @@ You are ready to call the script with your cli !
     - --lang : language of the repository to find
     - --min_stars : minimum amount of stars of the repository to find
     - --nb_repo : number of repositories to find
+- semantic-test-repo : uses CodeT5 to get the maximum score of a file related to the issues in the db
+    - --repository_name : name of the repository to test
 
 Every command has a --help option available to get more info on the current cli call.
 
@@ -36,7 +38,7 @@ $ python main.py find-repo --lang python --nb_repo 20
 ```
 $ python main.py get-data-repo --repository_name "nvbn/thefuck"
 ```
-Fetching files ⣾
+Fetching files ⣾\
 Fetching issues |████████████████████████████████| 41/41\
 Fetching pulls |████████████████████████████████| 41/41\
 Fetching data |████████████████████████████████| 34/34
