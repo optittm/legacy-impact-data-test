@@ -2,7 +2,7 @@
 
 ## Installation
 
-Create a [virtual environnement](https://docs.python.org/3/library/venv.html) and add all the dependencies needed with a python version of 3.8:
+Create a [virtual environnement](https://docs.python.org/3/library/venv.html) and add all the dependencies needed with :
 ```
 $ python -m venv c:\path\to\myenv
 $ pip install -r requirements.txt
