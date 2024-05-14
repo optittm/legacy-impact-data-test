@@ -125,7 +125,6 @@ def get_data_repo(repository_name):
 @inject
 def semantic_test_repo(repository_name):
     text_and_shas = sqlite.get_shas_texts_and_issueId(repository_name)
-    durations = []
     path = semantic.init_repo(repository_name)
     for title, body, sha, issueId in text_and_shas:
         start = default_timer()
@@ -141,8 +140,7 @@ def semantic_test_repo(repository_name):
         sqlite.insert(testResult)
         
         end = default_timer()
-        durations.append(end - start)
-    logging.info(durations)
+        logging.info(f"duration of the test: {end - start}")
 
 cli.add_command(semantic_test_repo)
 cli.add_command(get_data_repo)

@@ -86,7 +86,7 @@ class GithubFactory(AbcFactoryGit):
             pulls: Raw search results"""
         
         pulls = []
-        issues = self.g.search_issues(query=f"repo:{self.repository.full_name} is:pr is:merged linked:issue")
+        issues = self.g.search_issues(query=f"repo:{self.repository.full_name} is:pr is:merged linked:issue sort:created-asc")
         
         issueBar = IncrementalBar("Fetching issues", max = issues.totalCount)
         for issue in issues:
