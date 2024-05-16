@@ -35,12 +35,12 @@ class CodeT5(SemanticTest):
         text = text_issue
         file = ''
         max_similitude = float('-inf')
-        regex_real_file_path = fr"\.\/test\/{self.repoName}\\(.+)"
+        regex_real_file_path = fr"\.\/test\/{self.repoName}(.+)"
         self.functions_sources = []
         
         self.__embed_code()
 
-        function_bar = IncrementalBar(f"Generating semantic token ", max=len(self.functions_sources))
+        function_bar = IncrementalBar(f"Generating semantic token via LLM", max=len(self.functions_sources))
         for function_source in self.functions_sources:
             function_bar.next()
             if len(function_source[1]) > 24800:
