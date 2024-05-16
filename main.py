@@ -4,18 +4,22 @@ import click
 import sqlalchemy as db
 
 from github import Github, Auth
-from rich.console import Console
 from rich.table import Table
+from rich.console import Console
+from progress.bar import IncrementalBar
+from interfaces.CodeT5 import CodeT5
 from interfaces.SQLite import SQLite
+from interfaces.GithubFactory import GithubFactory
 from utils.containers import Container, providers
 from dependency_injector.wiring import inject
-from interfaces.GithubFactory import GithubFactory
-from progress.bar import IncrementalBar
 from sqlalchemy.orm import sessionmaker
-from models.db import setup_db
 from sqlalchemy.exc import ArgumentError
+from models.testResult import TestResult
+from models.db import setup_db
+from timeit import default_timer
+from utils.missingFileException import MissingFileException
 
-logging.basicConfig(filename='logs.log', encoding='utf-8', level=logging.DEBUG)
+logging.basicConfig(filename='logs.log', level=logging.DEBUG)
 
 @inject
 def configure_session(container: Container):
@@ -31,16 +35,22 @@ def configure_session(container: Container):
     container.session.override(
         providers.Singleton(Session)
     )
-    container.git_factory.override(
-        providers.Factory(
-            GithubFactory,
-            g = Github(auth=Auth.Token(os.getenv('GITHUB_TOKEN')))
-        )
-    )
     container.db_interface.override(
         providers.Singleton(
             SQLite,
             session = container.session
+        )
+    )
+    container.git_factory.override(
+        providers.Factory(
+            GithubFactory,
+            g = Github(auth=Auth.Token(os.getenv('GITHUB_TOKEN'))),
+            db = container.db_interface
+        )
+    )
+    container.semantic_test.override(
+        providers.Factory(
+            CodeT5
         )
     )
 
@@ -90,24 +100,49 @@ def get_data_repo(repository_name):
         repository_name: The name of the GitHub repository to fetch data for."""
     
     j = -1
-    repo = githubFactory.get_repository(repository_name)
-    sqlite.database_insert(repo)
+    sqlite.insert(githubFactory.get_repository(repository_name))
+    sqlite.insert_many(list(githubFactory.get_gitFiles()))
     
     pullList, pulls, issueNumbers = githubFactory.get_pull_requests()
     bar = IncrementalBar("Fetching data", max = len(issueNumbers))
     for pull, pullItem, issueNumber in zip(pulls, pullList, issueNumbers):
         j += 1
         bar.next()
-        newPullId = sqlite.database_insert(pullItem)
         issue, issueItem = githubFactory.get_issue(issueNumber)
-        newIssueId = sqlite.database_insert(issueItem)
-        sqlite.database_update_issueId_pullRequest(pullItem.githubId, newIssueId)
-        sqlite.database_insert_many(list(githubFactory.get_comments(issue, newIssueId)))
-        sqlite.database_insert_many(list(githubFactory.get_modified_files(pull, newPullId)))
+        if issue == 0 and issueItem == 0:
+            continue
+        newPullId = sqlite.insert(pullItem)
+        newIssueId = sqlite.insert(issueItem)
+        sqlite.update_issueId_pullRequest(pullItem.githubId, newIssueId)
+        sqlite.insert_many(list(githubFactory.get_comments(issue, newIssueId)))
+        sqlite.insert_many(list(githubFactory.get_modified_files(pull, newPullId)))
         logging.info("Committed data for issue: " + str(pullItem.issueId))
     
     bar.finish()
 
+@click.command()
+@click.option('--repository_name', envvar='REPOSITORY_NAME', default=os.getenv('REPOSITORY_NAME'), help='Name of the repository')
+@inject
+def semantic_test_repo(repository_name):
+    text_and_shas = sqlite.get_shas_texts_and_issueId(repository_name)
+    path = semantic.init_repo(repository_name)
+    for title, body, sha, issueId in text_and_shas:
+        start = default_timer()
+        
+        githubFactory.create_test_repo(sha, repository_name, path)
+        results = semantic.get_max_file_score_from_issue(title.join(', ' + body))
+        try: fileId = sqlite.get_file_id_by_filename(results[0], sqlite.get_repoId_from_repoName(repository_name))
+        except MissingFileException:
+            logging.warning(f"No file found with name {results[0]} in repo {repository_name}")
+            fileId = 0
+        testResult = TestResult(score = results[1], issueId = issueId, gitFileId = fileId)
+        
+        sqlite.insert(testResult)
+        
+        end = default_timer()
+        logging.info(f"duration of the test: {end - start}")
+
+cli.add_command(semantic_test_repo)
 cli.add_command(get_data_repo)
 cli.add_command(find_repo)
 
@@ -115,7 +150,8 @@ if __name__ == "__main__":
     container = Container()
     configure_session(container)
     
-    githubFactory = container.git_factory()
     sqlite = container.db_interface()
+    githubFactory = container.git_factory()
+    semantic = container.semantic_test()
     
     cli()

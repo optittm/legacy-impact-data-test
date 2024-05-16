@@ -1,5 +1,6 @@
 import logging
 import re
+import os
 
 from interfaces.AbcFactoryGit import AbcFactoryGit
 from models.repository import Repository
@@ -7,13 +8,17 @@ from models.issue import Issue
 from models.pullRequest import PullRequest
 from models.modifiedFiles import ModifiedFiles
 from models.comment import Comment
+from models.gitFile import GitFile
 from progress.bar import IncrementalBar
+from progress.spinner import PixelSpinner
+from utils.missingFileException import MissingFileException
 
 class GithubFactory(AbcFactoryGit):
     
-    def __init__(self, g):
+    def __init__(self, g, db):
         self.g = g
         self.file_id = 0
+        self.db = db
     
     def get_issue(self, number: int):
         """Gets an issue from the Github API.
@@ -23,8 +28,11 @@ class GithubFactory(AbcFactoryGit):
         
         Returns:
         A tuple containing the Github issue object and the local Issue model object."""
-        
-        issue = self.repository.get_issue(number=number)
+        try:
+            issue = self.repository.get_issue(number=number)
+        except:
+            logging.exception(f"Could not find Issue with ID : {number}")
+            return 0, 0
         return issue, Issue(
             githubId = issue.id,
             title = issue.title,
@@ -48,15 +56,23 @@ class GithubFactory(AbcFactoryGit):
         
         files = pull.get_files()
         for file in files:
+            try:
+                fileId = self.db.get_file_id_by_filename(file.filename, self.repository.id)
+            except MissingFileException:
+                fileId = self.db.insert(GitFile(
+                    sha = file.sha,
+                    fileName = file.filename,
+                    repositoryId = self.repository.id
+                ))
+            
             yield ModifiedFiles(
-                sha = file.sha,
-                filename = file.filename,
+                gitFileId = fileId,
+                pullRequestId = pullId,
                 status = file.status,
                 patch = file.patch,
                 additions = file.additions,
                 deletions = file.deletions,
-                changes = file.changes,
-                pullRequestId = pullId
+                changes = file.changes
             )
     
     def get_pull_requests(self):
@@ -70,7 +86,7 @@ class GithubFactory(AbcFactoryGit):
             pulls: Raw search results"""
         
         pulls = []
-        issues = self.g.search_issues(query=f"repo:{self.repository.full_name} is:pr is:merged linked:issue")
+        issues = self.g.search_issues(query=f"repo:{self.repository.full_name} is:pr is:merged linked:issue sort:created-asc")
         
         issueBar = IncrementalBar("Fetching issues", max = issues.totalCount)
         for issue in issues:
@@ -148,7 +164,29 @@ class GithubFactory(AbcFactoryGit):
                 issueId = issueId
             )
     
-    def find_repos(self, stars, lang, nb_repo):
+    def get_gitFiles(self):
+        """Recursively fetches all files in the repository, yielding a GitFile object for each file.
+        
+        The method uses a PixelSpinner to provide visual feedback while fetching the files.
+        It first gets the contents of the repository root directory, then recursively fetches the contents of any subdirectories.
+        For each file, it yields a GitFile object containing the file's SHA, file name, and repository ID."""
+        
+        contents = self.repository.get_contents("")
+        contentSpinner = PixelSpinner("Fetching files ")
+        while contents:
+            contentSpinner.next()
+            file = contents.pop(0)
+            if file.type == "dir":
+                contents.extend(self.repository.get_contents(file.path))
+            else:
+                yield GitFile(
+                    sha = file.sha,
+                    fileName = file.path,
+                    repositoryId = self.repository.id
+                )
+        contentSpinner.finish()
+    
+    def find_repos(self, stars: int, lang: str, nb_repo: int):
         """Searches GitHub repositories based on stars, language, and number of repos.
         
         Iterates through paginated search results up to the specified number of repos. 
@@ -165,16 +203,32 @@ class GithubFactory(AbcFactoryGit):
         i = 0        
         repos = self.g.search_repositories(query=f"stars:>={stars} language:{lang} is:public")
         for repo in repos:
+            totalIssues = self.g.search_issues(query=f"repo:{repo.full_name} is:merged linked:issue")
+            totalIssues.get_page(0)
             yield(
                 repo.full_name,
                 str(repo.stargazers_count),
-                str(self.g.search_issues(query=f"repo:{repo.full_name} is:merged linked:issue").totalCount),
+                str(totalIssues.totalCount),
                 str(repo.size),
                 repo.html_url
             )
             i += 1
             if i == int(nb_repo):
                 break
+    
+    def create_test_repo(self, shaBase, repoFullName: str, path_repos: str):
+        """Creates a test repository by cloning the repository specified by `self.repoFullName` and checking out the base commit specified by `shaBase`.
+        
+        If the test repository directory does not exist, it will be created under the `./test` directory. The repository will then be cloned from the specified URL and the base commit will be checked out.
+        
+        Parameters:
+            shaBase : The commit hash of the base commit to check out in the test repository."""
+        if not os.path.exists(path_repos):
+            if not os.path.exists("./test"):
+                os.mkdir("./test")
+            os.system(f"cd ./test && git clone https://github.com/{repoFullName}")
+        
+        os.system(f"cd {path_repos} && git checkout {shaBase}")
     
     def __find_issues_ids_in_text(self, text):
         """Gets issue ids from pr text.
