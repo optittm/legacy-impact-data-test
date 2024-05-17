@@ -35,7 +35,7 @@ class CodeT5(SemanticTest):
         text = text_issue
         file = ''
         max_similitude = float('-inf')
-        regex_real_file_path = fr"\.\/test\/{self.repoName}(.+)"
+        regex_real_file_path = fr"\.\/test\/{self.repoName}\\(.+)"
         self.functions_sources = []
         
         self.__embed_code()

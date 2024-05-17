@@ -8,6 +8,7 @@ from rich.table import Table
 from rich.console import Console
 from progress.bar import IncrementalBar
 from interfaces.CodeT5 import CodeT5
+from interfaces.Algorithmic import Algorithmic
 from interfaces.SQLite import SQLite
 from interfaces.GithubFactory import GithubFactory
 from utils.containers import Container, providers
@@ -50,7 +51,7 @@ def configure_session(container: Container):
     )
     container.semantic_test.override(
         providers.Factory(
-            CodeT5
+            Algorithmic # CodeT5, Algorithmic or IAGEN (IAGEN not implemented yet)
         )
     )
 
