@@ -1,6 +1,7 @@
 import logging
 import re
 import os
+import subprocess
 
 from interfaces.AbcFactoryGit import AbcFactoryGit
 from models.repository import Repository
@@ -223,12 +224,22 @@ class GithubFactory(AbcFactoryGit):
         
         Parameters:
             shaBase : The commit hash of the base commit to check out in the test repository."""
+        self.previousSha = 0
         if not os.path.exists(path_repos):
             if not os.path.exists("./test"):
                 os.mkdir("./test")
             os.system(f"cd ./test && git clone https://github.com/{repoFullName}")
         
         os.system(f"cd {path_repos} && git checkout {shaBase}")
+        if self.previousSha == 0:
+            self.previousSha = shaBase
+            return None
+        else:
+            command = f"cd ./test/gpt-pilot/ && git diff --name-only {shaBase} {self.previousSha}"
+            commandReturn = subprocess.run(command, shell=True, capture_output=True, text=True)
+            logging.info("git Diff : ")
+            logging.info(commandReturn.stdout.strip().split('\n'))
+            return commandReturn.stdout.strip().split('\n')
     
     def __find_issues_ids_in_text(self, text):
         """Gets issue ids from pr text.

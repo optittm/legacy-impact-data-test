@@ -80,7 +80,6 @@ class SQLite(DbInterface):
         stmt = select(Issue.title, Issue.body, PullRequest.shaBase, Issue.id).where(PullRequest.issueId == Issue.id).where(Issue.repositoryId == self.get_repoId_from_repoName(repositoryName))
         return(self.session.execute(stmt).fetchall())
     
-    
     def get_repoId_from_repoName(self, repositoryName: str):
         """Retrieves the database ID of a repository by its full name.
     

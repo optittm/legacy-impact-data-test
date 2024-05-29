@@ -51,7 +51,7 @@ def configure_session(container: Container):
     )
     container.semantic_test.override(
         providers.Factory(
-            Algorithmic # CodeT5, Algorithmic or IAGEN (IAGEN not implemented yet)
+            CodeT5 # CodeT5, Algorithmic or AIGEN (AIGEN not implemented yet)
         )
     )
 
@@ -130,8 +130,8 @@ def semantic_test_repo(repository_name):
     for title, body, sha, issueId in text_and_shas:
         start = default_timer()
         
-        githubFactory.create_test_repo(sha, repository_name, path)
-        results = semantic.get_max_file_score_from_issue(title.join(', ' + body))
+        file_diff = githubFactory.create_test_repo(sha, repository_name, path)
+        results = semantic.get_max_file_score_from_issue(title.join(', ' + body), file_diff)
         try: fileId = sqlite.get_file_id_by_filename(results[0], sqlite.get_repoId_from_repoName(repository_name))
         except MissingFileException:
             logging.warning(f"No file found with name {results[0]} in repo {repository_name}")
