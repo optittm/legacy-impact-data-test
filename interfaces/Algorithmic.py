@@ -1,6 +1,8 @@
 import re
 import os
 import nltk
+import sqlite3
+import pickle
 
 from nltk.corpus import words, wordnet
 from autocorrect import Speller
@@ -19,11 +21,29 @@ class Algorithmic(SemanticTest):
         except LookupError:
             nltk.download('wordnet')
             nltk.download('words')
+        self.conn = sqlite3.connect('transformed_texts.db')
+        self.c = self.conn.cursor()
+        self.c.execute('''CREATE TABLE IF NOT EXISTS transformed_texts (
+            file_path TEXT PRIMARY KEY,
+            transformed_text BLOB
+            )''')
+        self.conn.commit()
     
     def init_repo(self, repoFullName: str):
         self.repoName = repoFullName.split("/")[-1]
         self.path_repos = f"./test/{self.repoName}"
         return self.path_repos
+    
+    def __save_transformed_text_to_db(self, file_path, transformed_text):
+        self.c.execute('INSERT OR REPLACE INTO transformed_texts (file_path, transformed_text) VALUES (?, ?)', (file_path, pickle.dumps(transformed_text)))
+        self.conn.commit()
+
+    def __get_transformed_text_from_db(self, file_path):
+        self.c.execute('SELECT transformed_text FROM transformed_texts WHERE file_path = ?', (file_path,))
+        row = self.c.fetchone()
+        if row:
+            return pickle.loads(row[0])
+        return None
     
     def __expand_acronyms_with_wordnet(self, text):
         expanded_text = text
@@ -66,16 +86,16 @@ class Algorithmic(SemanticTest):
         split_string = list(filter(lambda x: x != '', split_string))
         return " ".join(split_string)
     
-    def __transform_code_into_text(self, filename):
-        # Get source code content
-        f = open(filename, encoding="utf8")
-        lines = ''.join(f.readlines())
-        f.close()
-        s = ""
+    def __transform_code_into_text(self, filename, recalculate=False):
+        if not recalculate:
+            cached_text = self.__get_transformed_text_from_db(filename)
+            if cached_text is not None:
+                return cached_text
 
-        # See : https://pygments.org/docs/quickstart/
-        #TODO: To be tested with C++ multi comment style, constants, etc.
-        #TODO: remove comment mark
+        with open(filename, encoding="utf8") as f:
+            lines = ''.join(f.readlines())
+
+        s = ""
         lexer = get_lexer_for_filename(filename)
         tokens = lexer.get_tokens(lines)
         for token in tokens:
@@ -86,25 +106,22 @@ class Algorithmic(SemanticTest):
             elif token[0] == Token.Comment.Multiline:
                 s = s + ' ' + token[1]
             elif token[0] == Token.Literal.String.Single:
-                if token[1] not in ["'",':', ';']:
+                if token[1] not in ["'", ':', ';']:
                     s = s + ' ' + token[1]
             elif token[0] == Token.Name.Function:
-                s = s + ' ' + self.__split_function_name(token[1]);
+                s = s + ' ' + self.__split_function_name(token[1])
             elif token[0] == Token.Name:
-                s = s + ' ' + self.__split_function_name(token[1]);     #Variable name
+                s = s + ' ' + self.__split_function_name(token[1])
 
-        # Remove duplicate spaces and new lines
         s = " ".join(s.split())
-
-        # Expand acronyms
         s = self.__replace_acronyms(s)
-
-        # Auto correct
         spell = Speller()
         s = spell(s)
+
+        self.__save_transformed_text_to_db(filename, s)
         return s
     
-    def text_similarity_scikit(self, text1, text2):
+    def __text_similarity_scikit(self, text1, text2):
         # Convert the texts into TF-IDF vectors
         vectorizer = TfidfVectorizer()
         vectors = vectorizer.fit_transform([text1, text2])
@@ -113,7 +130,7 @@ class Algorithmic(SemanticTest):
         similarity = cosine_similarity(vectors)
         return similarity
     
-    def get_max_file_score_from_issue(self, text: str):
+    def get_max_file_score_from_issue(self, text: str, files_to_recalculate=[]):
         s1 = []
         max_score = 0
         regex_real_file_path = fr"\.\/test\/{self.repoName}\\(.+)"
@@ -124,8 +141,14 @@ class Algorithmic(SemanticTest):
                 function_bar.next()
                 if file.endswith('.py'):
                     filename = os.path.join(root, file)
-                    score = self.text_similarity_scikit(self.__transform_code_into_text(filename), text)
+                    if files_to_recalculate is not None:
+                        recalculate = re.search(regex_real_file_path, filename).group(1).replace("\\", "/") in files_to_recalculate
+                    else:
+                        recalculate = False
+                    transformed_text = self.__transform_code_into_text(filename, recalculate)
+                    score = self.__text_similarity_scikit(transformed_text, text)
                     s1.append([filename, score[0][1]])
+
         function_bar.finish()
         
         for input in s1:
@@ -133,5 +156,5 @@ class Algorithmic(SemanticTest):
                 max_score = input[1]
                 max_input = input[0]
         
-        match = re.search(regex_real_file_path, max_input)
-        return match.group(1).replace("\\", "/"), max_score
+        match = re.search(regex_real_file_path, max_input).group(1).replace("\\", "/")
+        return match, max_score
