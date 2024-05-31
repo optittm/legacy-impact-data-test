@@ -136,3 +136,9 @@ class CodeT5(SemanticTest):
     def __save_embedding_to_db(self, file_path, embedding):
         self.c.execute('INSERT OR REPLACE INTO embeddings (file_path, embedding) VALUES (?, ?)', (file_path, pickle.dumps(embedding)))
         self.conn.commit()
+    
+    def clean(self):
+        self.conn.close()
+        os.remove("./gitEmbeddings.db")
+    
+    

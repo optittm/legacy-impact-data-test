@@ -158,3 +158,9 @@ class Algorithmic(SemanticTest):
         
         match = re.search(regex_real_file_path, max_input).group(1).replace("\\", "/")
         return match, max_score
+    
+    def clean(self):
+        self.conn.close()
+        os.remove("./transformed_texts.db")
+    
+    

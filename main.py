@@ -142,6 +142,8 @@ def semantic_test_repo(repository_name):
         
         end = default_timer()
         logging.info(f"duration of the test: {end - start}")
+    
+    semantic.clean()
 
 cli.add_command(semantic_test_repo)
 cli.add_command(get_data_repo)
