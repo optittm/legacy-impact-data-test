@@ -8,7 +8,7 @@ from models.modifiedFiles import ModifiedFiles
 from models.gitFile import GitFile
 from models.comment import Comment
 from models.testResult import TestResult
-from sqlalchemy import update, select
+from sqlalchemy import update, select, func
 from typing import List
 from utils.missingFileException import MissingFileException
 
@@ -90,3 +90,8 @@ class SQLite(DbInterface):
             int: The database ID of the repository."""
         stmt = select(Repository.id).where(Repository.fullName == repositoryName)
         return(self.session.execute(stmt).fetchone()[0])
+    
+    def issue_already_treated(self, issueId: int):
+        stmt = select(func.count(TestResult.issueId)).where(TestResult.issueId == issueId)
+        result = self.session.execute(stmt).scalar()
+        return result > 0

@@ -128,6 +128,10 @@ def semantic_test_repo(repository_name):
     text_and_shas = sqlite.get_shas_texts_and_issueId(repository_name)
     path = semantic.init_repo(repository_name)
     for title, body, sha, issueId in text_and_shas:
+        if sqlite.issue_already_treated(issueId):
+            logging.info(f"Issue {issueId} has already been treated. Skipping...")
+            continue
+        
         start = default_timer()
         
         file_diff = githubFactory.create_test_repo(sha, repository_name, path)
