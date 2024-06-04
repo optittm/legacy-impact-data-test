@@ -91,7 +91,7 @@ class SQLite(DbInterface):
         stmt = select(Repository.id).where(Repository.fullName == repositoryName)
         return(self.session.execute(stmt).fetchone()[0])
     
-    def issue_already_treated(self, issueId: int):
+    def issue_exists(self, issueId: int) -> bool:
         stmt = select(func.count(TestResult.issueId)).where(TestResult.issueId == issueId)
         result = self.session.execute(stmt).scalar()
         return result > 0

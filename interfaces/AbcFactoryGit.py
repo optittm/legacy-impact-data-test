@@ -33,5 +33,5 @@ class AbcFactoryGit(ABC):
         raise NotImplementedError()
     
     @abstractmethod
-    def create_test_repo(self, shaBase, repoFullName: str, path_repos: str):
+    def setup_repo_and_get_file_diff(self, shaBase, repoFullName: str, path_repos: str):
         raise NotImplementedError()

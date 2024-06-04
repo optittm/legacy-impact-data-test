@@ -217,13 +217,17 @@ class GithubFactory(AbcFactoryGit):
             if i == int(nb_repo):
                 break
     
-    def create_test_repo(self, shaBase, repoFullName: str, path_repos: str):
-        """Creates a test repository by cloning the repository specified by `self.repoFullName` and checking out the base commit specified by `shaBase`.
-        
-        If the test repository directory does not exist, it will be created under the `./test` directory. The repository will then be cloned from the specified URL and the base commit will be checked out.
+    def setup_repo_and_get_file_diff(self, shaBase, repoFullName: str, path_repos: str):
+        """Sets up a local repository clone, checks out the specified base commit SHA, and returns the list of files that have changed between the base commit and the previous commit.
         
         Parameters:
-            shaBase : The commit hash of the base commit to check out in the test repository."""
+            shaBase (str): The commit SHA of the base commit to check out.
+            repoFullName (str): The full name of the GitHub repository in the format "user/repo".
+            path_repos (str): The local path where the repository should be cloned.
+        
+        Returns:
+            list[str]: The list of file paths that have changed between the base commit and the previous commit."""
+            
         self.previousSha = 0
         if not os.path.exists(path_repos):
             if not os.path.exists("./test"):
@@ -237,8 +241,6 @@ class GithubFactory(AbcFactoryGit):
         else:
             command = f"cd ./test/gpt-pilot/ && git diff --name-only {shaBase} {self.previousSha}"
             commandReturn = subprocess.run(command, shell=True, capture_output=True, text=True)
-            logging.info("git Diff : ")
-            logging.info(commandReturn.stdout.strip().split('\n'))
             return commandReturn.stdout.strip().split('\n')
     
     def __find_issues_ids_in_text(self, text):

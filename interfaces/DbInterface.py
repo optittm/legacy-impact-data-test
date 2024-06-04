@@ -34,3 +34,7 @@ class DbInterface(ABC):
     @abstractmethod
     def get_repoId_from_repoName(self, repositoryName: str):
         raise NotImplementedError()
+    
+    @abstractmethod
+    def issue_exists(self, issueId: int):
+        raise NotImplementedError()

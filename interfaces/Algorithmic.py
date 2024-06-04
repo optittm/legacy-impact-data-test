@@ -86,8 +86,8 @@ class Algorithmic(SemanticTest):
         split_string = list(filter(lambda x: x != '', split_string))
         return " ".join(split_string)
     
-    def __transform_code_into_text(self, filename, recalculate=False):
-        if not recalculate:
+    def __transform_code_into_text(self, filename, recalculate=None):
+        if recalculate is not None:
             cached_text = self.__get_transformed_text_from_db(filename)
             if cached_text is not None:
                 return cached_text
@@ -98,20 +98,18 @@ class Algorithmic(SemanticTest):
         s = ""
         lexer = get_lexer_for_filename(filename)
         tokens = lexer.get_tokens(lines)
-        for token in tokens:
-            if token[0] == Token.Literal.String.Doc:
-                s = s + ' ' + token[1]
-            elif token[0] == Token.Comment.Single:
-                s = s + ' ' + token[1]
-            elif token[0] == Token.Comment.Multiline:
-                s = s + ' ' + token[1]
-            elif token[0] == Token.Literal.String.Single:
-                if token[1] not in ["'", ':', ';']:
-                    s = s + ' ' + token[1]
-            elif token[0] == Token.Name.Function:
-                s = s + ' ' + self.__split_function_name(token[1])
-            elif token[0] == Token.Name:
-                s = s + ' ' + self.__split_function_name(token[1])
+        for token in tokens:  
+            token_type, token_value = token[0], token[1]
+            comments_tokens = {Token.Literal.String.Doc, Token.Comment.Single, Token.Comment.Multiline}
+            name_tokens = {Token.Name.Function, Token.Name}
+
+            if token_type in comments_tokens:
+                s += ' ' + token_value
+            elif token_type == Token.Literal.String.Single:
+                if token_value not in ["'", ':', ';']:
+                    s += ' ' + token_value
+            elif token_type in name_tokens:
+                s += ' ' + self.__split_function_name(token_value)
 
         s = " ".join(s.split())
         s = self.__replace_acronyms(s)
@@ -143,8 +141,6 @@ class Algorithmic(SemanticTest):
                     filename = os.path.join(root, file)
                     if files_to_recalculate is not None:
                         recalculate = re.search(regex_real_file_path, filename).group(1).replace("\\", "/") in files_to_recalculate
-                    else:
-                        recalculate = False
                     transformed_text = self.__transform_code_into_text(filename, recalculate)
                     score = self.__text_similarity_scikit(transformed_text, text)
                     s1.append([filename, score[0][1]])

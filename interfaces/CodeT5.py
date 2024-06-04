@@ -101,8 +101,8 @@ class CodeT5(SemanticTest):
                 generated_ids = self.codeT5.generate(input_ids, max_length=20)
                 function_source.append(self.tokenizer.decode(generated_ids[0], skip_special_tokens=True))
                 
-                embedding = self.bert.encode(function_source[2], convert_to_tensor=True, show_progress_bar=False)
-                self.__save_embedding_to_db(file_path, function_name, embedding)
+                code_embedding = self.bert.encode(function_source[2], convert_to_tensor=True, show_progress_bar=False)
+                self.__save_embedding_to_db(file_path, function_name, code_embedding)
     
     def __compute_similarity(self, text_issue: str):
         file = ''
@@ -113,12 +113,12 @@ class CodeT5(SemanticTest):
             function_bar.next()
             file_path = re.search(self.regex_real_file_path, function_source[0]).group(1).replace("\\", "/")
             function_name = re.search(self.regex_function_name, function_source[1]).group(1)
-            embedding_1 = self.bert.encode(text_issue, convert_to_tensor=True, show_progress_bar=False)
+            issue_embedding = self.bert.encode(text_issue, convert_to_tensor=True, show_progress_bar=False)
             
             try:
-                embedding_2 = self.__get_embedding_from_db(file_path, function_name)
-                if embedding_2 is not None:
-                    similarity = util.pytorch_cos_sim(embedding_1, embedding_2).item()
+                code_embedding = self.__get_embedding_from_db(file_path, function_name)
+                if code_embedding is not None:
+                    similarity = util.pytorch_cos_sim(issue_embedding, code_embedding).item()
                     if max_similitude < similarity:
                         max_similitude = similarity
                         file = file_path
