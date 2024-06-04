@@ -154,15 +154,30 @@ def semantic_test_repo(repository_name):
 @click.command()
 @inject
 def test():
-    command = "cd .venv/Scripts && activate.bat && cd ../.. && python main.py semantic-test-repo"
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, shell=True, text=True)
-    stdout, _ = process.communicate()
-    print(stdout)
-    regex_error_pattern = r"Running this sequence through the model will result in indexing errors"
-    if re.search(regex_error_pattern, stdout):
-        print("Error detected: token too long")
-    else:
-        print("No error detected")
+    activate_command = "cd .venv/Scripts && activate.bat && cd ../.."
+    run_command = "python main.py semantic-test-repo"
+
+    # Run activation command and capture output
+    process = subprocess.Popen(activate_command, shell=True, text=True)
+    process.communicate()
+
+    if process.returncode != 0:
+        print("Activation failed. Exiting.")
+        return
+
+    # Run main.py command and capture output
+    process = subprocess.Popen(run_command, stderr=subprocess.PIPE, shell=True, text=True)
+    _, stderr = process.communicate()
+    error_pattern = "Token indices sequence length is longer than the specified maximum sequence length for this model"
+
+    print("Processing Output:")
+    for line in stderr.splitlines():
+        line = line.strip()
+        print(line)
+        if line.startswith(error_pattern):
+            print("Error detected: token too long")
+        else:
+            print("No error detected")
     
     semantic.clean()
 
