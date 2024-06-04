@@ -102,7 +102,6 @@ class CodeT5(SemanticTest):
                 function_source.append(self.tokenizer.decode(generated_ids[0], skip_special_tokens=True))
                 
                 embedding = self.bert.encode(function_source[2], convert_to_tensor=True, show_progress_bar=False)
-                self.__remove_previous_line()
                 self.__save_embedding_to_db(file_path, function_name, embedding)
     
     def __compute_similarity(self, text_issue: str):
@@ -115,7 +114,6 @@ class CodeT5(SemanticTest):
             file_path = re.search(self.regex_real_file_path, function_source[0]).group(1).replace("\\", "/")
             function_name = re.search(self.regex_function_name, function_source[1]).group(1)
             embedding_1 = self.bert.encode(text_issue, convert_to_tensor=True, show_progress_bar=False)
-            self.__remove_previous_line()
             
             try:
                 embedding_2 = self.__get_embedding_from_db(file_path, function_name)
@@ -148,6 +146,4 @@ class CodeT5(SemanticTest):
         self.conn.close()
         os.remove("./gitEmbeddings.db")
     
-    def __remove_previous_line(self):
-        sys.stdout.write("\033[F")
-        sys.stdout.write("\033[K")
+    

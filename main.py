@@ -1,6 +1,8 @@
 import logging
 import os
+import re
 import click
+import subprocess
 import sqlalchemy as db
 
 from github import Github, Auth
@@ -147,11 +149,27 @@ def semantic_test_repo(repository_name):
         end = default_timer()
         logging.info(f"duration of the test: {end - start}")
     
+    
+
+@click.command()
+@inject
+def test():
+    command = "cd .venv/Scripts && activate.bat && cd ../.. && python main.py semantic-test-repo"
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, shell=True, text=True)
+    stdout, _ = process.communicate()
+    print(stdout)
+    regex_error_pattern = r"Running this sequence through the model will result in indexing errors"
+    if re.search(regex_error_pattern, stdout):
+        print("Error detected: token too long")
+    else:
+        print("No error detected")
+    
     semantic.clean()
 
 cli.add_command(semantic_test_repo)
 cli.add_command(get_data_repo)
 cli.add_command(find_repo)
+cli.add_command(test)
 
 if __name__ == "__main__":
     container = Container()
@@ -162,3 +180,4 @@ if __name__ == "__main__":
     semantic = container.semantic_test()
     
     cli()
+
