@@ -1,5 +1,6 @@
 import ast
 import logging
+import sys
 import astunparse
 import os
 import re
@@ -20,11 +21,12 @@ class CodeT5(SemanticTest):
         self.tokenizer = AutoTokenizer.from_pretrained(checkpoint, trust_remote_code=True)
         self.codeT5 = AutoModel.from_pretrained(checkpoint, trust_remote_code=True).to(self.device)
         self.bert = SentenceTransformer(os.getenv('SENTENCE_TRANSFORMER'))
-        self.functions_sources = []
         self.conn = sqlite3.connect('gitEmbeddings.db')
         self.c = self.conn.cursor()
         self.c.execute('''CREATE TABLE IF NOT EXISTS embeddings (
-            file_path TEXT PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_path TEXT,
+            function_name TEXT,
             embedding BLOB
             )''')
         self.conn.commit()
@@ -33,6 +35,7 @@ class CodeT5(SemanticTest):
         self.repoName = repoFullName.split("/")[-1]
         self.path_repos = f"./test/{self.repoName}"
         self.regex_real_file_path = fr"\.\/test\/{self.repoName}\\(.+)"
+        self.regex_function_name = r"def\s+(\w+)"
         return self.path_repos
     
     def get_max_file_score_from_issue(self, text_issue: str, recompute_files = None):
@@ -85,19 +88,22 @@ class CodeT5(SemanticTest):
     def __embed_and_store_code(self, recompute_files = None):
         if recompute_files is None:
             recompute_files = []
+        self.functions_sources = []
         
         self.__embed_code()
 
         for function_source in self.functions_sources:
             file_path = re.search(self.regex_real_file_path, function_source[0]).group(1).replace("\\", "/")
+            function_name = re.search(self.regex_function_name, function_source[1]).group(1)
             
-            if file_path in recompute_files or self.__get_embedding_from_db(file_path) is None:
+            if file_path in recompute_files or self.__get_embedding_from_db(file_path, function_name) is None:
                 input_ids = self.tokenizer(function_source[1], return_tensors="pt").input_ids.to(self.device)
                 generated_ids = self.codeT5.generate(input_ids, max_length=20)
                 function_source.append(self.tokenizer.decode(generated_ids[0], skip_special_tokens=True))
                 
-                embedding = self.bert.encode(function_source[2], convert_to_tensor=True)
-                self.__save_embedding_to_db(file_path, embedding)
+                embedding = self.bert.encode(function_source[2], convert_to_tensor=True, show_progress_bar=False)
+                self.__remove_previous_line()
+                self.__save_embedding_to_db(file_path, function_name, embedding)
     
     def __compute_similarity(self, text_issue: str):
         file = ''
@@ -107,12 +113,13 @@ class CodeT5(SemanticTest):
         for function_source in self.functions_sources:
             function_bar.next()
             file_path = re.search(self.regex_real_file_path, function_source[0]).group(1).replace("\\", "/")
+            function_name = re.search(self.regex_function_name, function_source[1]).group(1)
+            embedding_1 = self.bert.encode(text_issue, convert_to_tensor=True, show_progress_bar=False)
+            self.__remove_previous_line()
             
             try:
-                embedding_2 = self.__get_embedding_from_db(file_path)
+                embedding_2 = self.__get_embedding_from_db(file_path, function_name)
                 if embedding_2 is not None:
-                    embedding_1 = self.bert.encode(text_issue, convert_to_tensor=True)
-
                     similarity = util.pytorch_cos_sim(embedding_1, embedding_2).item()
                     if max_similitude < similarity:
                         max_similitude = similarity
@@ -126,19 +133,21 @@ class CodeT5(SemanticTest):
         function_bar.finish()
         return file, max_similitude
     
-    def __get_embedding_from_db(self, file_path):
-        self.c.execute('SELECT embedding FROM embeddings WHERE file_path = ?', (file_path,))
+    def __get_embedding_from_db(self, file_path, function_name):
+        self.c.execute('SELECT embedding FROM embeddings WHERE file_path = ? AND function_name = ?', (file_path, function_name))
         row = self.c.fetchone()
         if row:
             return pickle.loads(row[0])
         return None
 
-    def __save_embedding_to_db(self, file_path, embedding):
-        self.c.execute('INSERT OR REPLACE INTO embeddings (file_path, embedding) VALUES (?, ?)', (file_path, pickle.dumps(embedding)))
+    def __save_embedding_to_db(self, file_path, function_name, embedding):
+        self.c.execute('INSERT OR REPLACE INTO embeddings (file_path, function_name, embedding) VALUES (?, ?, ?)', (file_path, function_name, pickle.dumps(embedding)))
         self.conn.commit()
     
     def clean(self):
         self.conn.close()
         os.remove("./gitEmbeddings.db")
     
-    
+    def __remove_previous_line(self):
+        sys.stdout.write("\033[F")
+        sys.stdout.write("\033[K")
