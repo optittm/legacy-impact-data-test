@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from interfaces.DbInterface import DbInterface
+from interfaces.Database.DbInterface import DbInterface
 from models.repository import Repository
 from models.issue import Issue
 from models.pullRequest import PullRequest

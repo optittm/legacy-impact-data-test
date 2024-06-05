@@ -1,14 +1,11 @@
 import ast
 import logging
-import sys
 import astunparse
 import os
 import re
 import torch
-import sqlite3
-import pickle
 
-from interfaces.SemanticTest import SemanticTest
+from interfaces.Semantic.SemanticTest import SemanticTest
 from sentence_transformers import SentenceTransformer, util
 from transformers import AutoModel, AutoTokenizer
 from progress.bar import IncrementalBar
@@ -21,21 +18,13 @@ class CodeT5(SemanticTest):
         self.tokenizer = AutoTokenizer.from_pretrained(checkpoint, trust_remote_code=True)
         self.codeT5 = AutoModel.from_pretrained(checkpoint, trust_remote_code=True).to(self.device)
         self.bert = SentenceTransformer(os.getenv('SENTENCE_TRANSFORMER'))
-        self.conn = sqlite3.connect('gitEmbeddings.db')
-        self.c = self.conn.cursor()
-        self.c.execute('''CREATE TABLE IF NOT EXISTS embeddings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_path TEXT,
-            function_name TEXT,
-            embedding BLOB
-            )''')
-        self.conn.commit()
     
-    def init_repo(self, repoFullName: str):
+    def init_repo(self, repoFullName: str, embedding):
         self.repoName = repoFullName.split("/")[-1]
         self.path_repos = f"./test/{self.repoName}"
         self.regex_real_file_path = fr"\.\/test\/{self.repoName}\\(.+)"
         self.regex_function_name = r"def\s+(\w+)"
+        self.embedding_db = embedding
         return self.path_repos
     
     def get_max_file_score_from_issue(self, text_issue: str, recompute_files = None):
@@ -96,13 +85,13 @@ class CodeT5(SemanticTest):
             file_path = re.search(self.regex_real_file_path, function_source[0]).group(1).replace("\\", "/")
             function_name = re.search(self.regex_function_name, function_source[1]).group(1)
             
-            if file_path in recompute_files or self.__get_embedding_from_db(file_path, function_name) is None:
+            if file_path in recompute_files or self.embedding_db.get_embedding(file_path, function_name) is None:
                 input_ids = self.tokenizer(function_source[1], return_tensors="pt").input_ids.to(self.device)
                 generated_ids = self.codeT5.generate(input_ids, max_length=20)
                 function_source.append(self.tokenizer.decode(generated_ids[0], skip_special_tokens=True))
                 
                 code_embedding = self.bert.encode(function_source[2], convert_to_tensor=True, show_progress_bar=False)
-                self.__save_embedding_to_db(file_path, function_name, code_embedding)
+                self.embedding_db.save_embedding(file_path, function_name, code_embedding)
     
     def __compute_similarity(self, text_issue: str):
         file = ''
@@ -116,7 +105,7 @@ class CodeT5(SemanticTest):
             issue_embedding = self.bert.encode(text_issue, convert_to_tensor=True, show_progress_bar=False)
             
             try:
-                code_embedding = self.__get_embedding_from_db(file_path, function_name)
+                code_embedding = self.embedding_db.get_embedding(file_path, function_name)
                 if code_embedding is not None:
                     similarity = util.pytorch_cos_sim(issue_embedding, code_embedding).item()
                     if max_similitude < similarity:
@@ -130,17 +119,6 @@ class CodeT5(SemanticTest):
         
         function_bar.finish()
         return file, max_similitude
-    
-    def __get_embedding_from_db(self, file_path, function_name):
-        self.c.execute('SELECT embedding FROM embeddings WHERE file_path = ? AND function_name = ?', (file_path, function_name))
-        row = self.c.fetchone()
-        if row:
-            return pickle.loads(row[0])
-        return None
-
-    def __save_embedding_to_db(self, file_path, function_name, embedding):
-        self.c.execute('INSERT OR REPLACE INTO embeddings (file_path, function_name, embedding) VALUES (?, ?, ?)', (file_path, function_name, pickle.dumps(embedding)))
-        self.conn.commit()
     
     def clean(self):
         self.conn.close()

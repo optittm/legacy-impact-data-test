@@ -1,6 +1,5 @@
 import logging
 import os
-import re
 import click
 import subprocess
 import sqlalchemy as db
@@ -9,9 +8,10 @@ from github import Github, Auth
 from rich.table import Table
 from rich.console import Console
 from progress.bar import IncrementalBar
-from interfaces.CodeT5 import CodeT5
-from interfaces.Algorithmic import Algorithmic
-from interfaces.SQLite import SQLite
+from interfaces.Database.GitEmbedding import GitEmbedding
+from interfaces.Semantic.CodeT5 import CodeT5
+from interfaces.Semantic.Algorithmic import Algorithmic
+from interfaces.Database.SQLite import SQLite
 from interfaces.GithubFactory import GithubFactory
 from utils.containers import Container, providers
 from dependency_injector.wiring import inject
@@ -54,6 +54,11 @@ def configure_session(container: Container):
     container.semantic_test.override(
         providers.Factory(
             CodeT5 # CodeT5, Algorithmic or AIGEN (AIGEN not implemented yet)
+        )
+    )
+    container.db_embedding.override(
+        providers.Singleton(
+            GitEmbedding
         )
     )
 
@@ -128,9 +133,9 @@ def get_data_repo(repository_name):
 @inject
 def semantic_test_repo(repository_name):
     text_and_shas = sqlite.get_shas_texts_and_issueId(repository_name)
-    path = semantic.init_repo(repository_name)
+    path = semantic.init_repo(repository_name, embedding)
     for title, body, sha, issueId in text_and_shas:
-        if sqlite.issue_already_treated(issueId):
+        if sqlite.issue_exists(issueId):
             logging.info(f"Issue {issueId} has already been treated. Skipping...")
             continue
         
@@ -192,6 +197,7 @@ if __name__ == "__main__":
     sqlite = container.db_interface()
     githubFactory = container.git_factory()
     semantic = container.semantic_test()
+    embedding = container.db_embedding()
     
     cli()
 

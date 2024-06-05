@@ -1,8 +1,6 @@
 import re
 import os
 import nltk
-import sqlite3
-import pickle
 
 from nltk.corpus import words, wordnet
 from autocorrect import Speller
@@ -10,7 +8,7 @@ from pygments.token import Token
 from pygments.lexers import get_lexer_for_filename
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
-from interfaces.SemanticTest import SemanticTest
+from interfaces.Semantic.SemanticTest import SemanticTest
 from progress.bar import IncrementalBar
 
 class Algorithmic(SemanticTest):
@@ -21,29 +19,12 @@ class Algorithmic(SemanticTest):
         except LookupError:
             nltk.download('wordnet')
             nltk.download('words')
-        self.conn = sqlite3.connect('transformed_texts.db')
-        self.c = self.conn.cursor()
-        self.c.execute('''CREATE TABLE IF NOT EXISTS transformed_texts (
-            file_path TEXT PRIMARY KEY,
-            transformed_text BLOB
-            )''')
-        self.conn.commit()
     
-    def init_repo(self, repoFullName: str):
+    def init_repo(self, repoFullName: str, embedding):
         self.repoName = repoFullName.split("/")[-1]
         self.path_repos = f"./test/{self.repoName}"
+        self.embedding_db = embedding
         return self.path_repos
-    
-    def __save_transformed_text_to_db(self, file_path, transformed_text):
-        self.c.execute('INSERT OR REPLACE INTO transformed_texts (file_path, transformed_text) VALUES (?, ?)', (file_path, pickle.dumps(transformed_text)))
-        self.conn.commit()
-
-    def __get_transformed_text_from_db(self, file_path):
-        self.c.execute('SELECT transformed_text FROM transformed_texts WHERE file_path = ?', (file_path,))
-        row = self.c.fetchone()
-        if row:
-            return pickle.loads(row[0])
-        return None
     
     def __expand_acronyms_with_wordnet(self, text):
         expanded_text = text
@@ -86,9 +67,9 @@ class Algorithmic(SemanticTest):
         split_string = list(filter(lambda x: x != '', split_string))
         return " ".join(split_string)
     
-    def __transform_code_into_text(self, filename, recalculate=None):
-        if recalculate is not None:
-            cached_text = self.__get_transformed_text_from_db(filename)
+    def __transform_code_into_text(self, filename, recalculate=False):
+        if recalculate is False:
+            cached_text = self.embedding_db.get_embedding(filename)
             if cached_text is not None:
                 return cached_text
 
@@ -116,7 +97,7 @@ class Algorithmic(SemanticTest):
         spell = Speller()
         s = spell(s)
 
-        self.__save_transformed_text_to_db(filename, s)
+        self.embedding_db.save_embedding(filename, s)
         return s
     
     def __text_similarity_scikit(self, text1, text2):
