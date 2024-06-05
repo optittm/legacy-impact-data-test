@@ -23,6 +23,7 @@ class Algorithmic(SemanticTest):
     def init_repo(self, repoFullName: str, embedding):
         self.repoName = repoFullName.split("/")[-1]
         self.path_repos = f"./test/{self.repoName}"
+        self.regex_function_name = r"def\s+(\w+)"
         self.embedding_db = embedding
         return self.path_repos
     
@@ -122,6 +123,8 @@ class Algorithmic(SemanticTest):
                     filename = os.path.join(root, file)
                     if files_to_recalculate is not None:
                         recalculate = re.search(regex_real_file_path, filename).group(1).replace("\\", "/") in files_to_recalculate
+                    else:
+                        recalculate = False
                     transformed_text = self.__transform_code_into_text(filename, recalculate)
                     score = self.__text_similarity_scikit(transformed_text, text)
                     s1.append([filename, score[0][1]])
@@ -135,9 +138,5 @@ class Algorithmic(SemanticTest):
         
         match = re.search(regex_real_file_path, max_input).group(1).replace("\\", "/")
         return match, max_score
-    
-    def clean(self):
-        self.conn.close()
-        os.remove("./transformed_texts.db")
     
     

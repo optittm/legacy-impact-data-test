@@ -9,7 +9,3 @@ class SemanticTest(ABC):
     @abstractmethod
     def init_repo(self, repoFullName: str):
         raise NotImplementedError()
-    
-    @abstractmethod
-    def clean(self):
-        raise NotImplementedError()

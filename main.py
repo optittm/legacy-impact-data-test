@@ -8,7 +8,8 @@ from github import Github, Auth
 from rich.table import Table
 from rich.console import Console
 from progress.bar import IncrementalBar
-from interfaces.Database.GitEmbedding import GitEmbedding
+from interfaces.Database.EmbeddingT5 import EmbeddingT5
+from interfaces.Database.EmbeddingAlg import EmbeddingAlg
 from interfaces.Semantic.CodeT5 import CodeT5
 from interfaces.Semantic.Algorithmic import Algorithmic
 from interfaces.Database.SQLite import SQLite
@@ -53,12 +54,12 @@ def configure_session(container: Container):
     )
     container.semantic_test.override(
         providers.Factory(
-            CodeT5 # CodeT5, Algorithmic or AIGEN (AIGEN not implemented yet)
+            Algorithmic # CodeT5, Algorithmic or AIGEN (AIGEN not implemented yet)
         )
     )
     container.db_embedding.override(
         providers.Singleton(
-            GitEmbedding
+            EmbeddingAlg # EmbeddingT5, EmbeddingAlg or EmbeddingGen (EmbeddingGen not implemented yet)
         )
     )
 
@@ -174,16 +175,16 @@ def test():
     _, stderr = process.communicate()
     error_pattern = "Token indices sequence length is longer than the specified maximum sequence length for this model"
 
-    print("Processing Output:")
     for line in stderr.splitlines():
         line = line.strip()
         print(line)
         if line.startswith(error_pattern):
             print("Error detected: token too long")
+            #break
         else:
             print("No error detected")
     
-    semantic.clean()
+    embedding.clean()
 
 cli.add_command(semantic_test_repo)
 cli.add_command(get_data_repo)

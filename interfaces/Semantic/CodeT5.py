@@ -120,8 +120,4 @@ class CodeT5(SemanticTest):
         function_bar.finish()
         return file, max_similitude
     
-    def clean(self):
-        self.conn.close()
-        os.remove("./gitEmbeddings.db")
-    
     
