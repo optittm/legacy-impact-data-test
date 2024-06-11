@@ -142,7 +142,7 @@ def semantic_test_repo(repository_name):
         
         start = default_timer()
         
-        file_diff = githubFactory.setup_repo_and_get_file_diff(sha, repository_name, path)
+        file_diff = githubFactory.setup_repo(sha, repository_name, path)
         results = semantic.get_max_file_score_from_issue(title.join(', ' + body), file_diff)
         try: fileId = sqlite.get_file_id_by_filename(results[0], sqlite.get_repoId_from_repoName(repository_name))
         except MissingFileException:

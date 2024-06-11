@@ -20,6 +20,7 @@ class GithubFactory(AbcFactoryGit):
         self.g = g
         self.file_id = 0
         self.db = db
+        self.previousSha = 0
     
     def get_issue(self, number: int):
         """Gets an issue from the Github API.
@@ -217,7 +218,7 @@ class GithubFactory(AbcFactoryGit):
             if i == int(nb_repo):
                 break
     
-    def setup_repo_and_get_file_diff(self, shaBase, repoFullName: str, path_repos: str):
+    def setup_repo(self, shaBase, repoFullName: str, path_repos: str):
         """Sets up a local repository clone, checks out the specified base commit SHA, and returns the list of files that have changed between the base commit and the previous commit.
         
         Parameters:
@@ -228,12 +229,14 @@ class GithubFactory(AbcFactoryGit):
         Returns:
             list[str]: The list of file paths that have changed between the base commit and the previous commit."""
             
-        self.previousSha = 0
         if not os.path.exists(path_repos):
             if not os.path.exists("./test"):
                 os.mkdir("./test")
             os.system(f"cd ./test && git clone https://github.com/{repoFullName}")
         
+        return self.__get_file_diff(shaBase, path_repos)
+    
+    def __get_file_diff(self, shaBase, path_repos):
         os.system(f"cd {path_repos} && git checkout {shaBase}")
         if self.previousSha == 0:
             self.previousSha = shaBase

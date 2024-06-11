@@ -68,7 +68,7 @@ class Algorithmic(SemanticTest):
         split_string = list(filter(lambda x: x != '', split_string))
         return " ".join(split_string)
     
-    def __transform_code_into_text(self, filename, recalculate=False):
+    def __transform_code_into_text(self, filename, recalculate):
         if recalculate is False:
             cached_text = self.embedding_db.get_embedding(filename)
             if cached_text is not None:
@@ -113,6 +113,7 @@ class Algorithmic(SemanticTest):
     def get_max_file_score_from_issue(self, text: str, files_to_recalculate=[]):
         s1 = []
         max_score = 0
+        recalculate = False
         regex_real_file_path = fr"\.\/test\/{self.repoName}\\(.+)"
         function_bar = IncrementalBar(f"Generating semantic token via Algorithmic", max=sum(len(files) for _, _, files in os.walk(self.path_repos)))
         
@@ -123,8 +124,6 @@ class Algorithmic(SemanticTest):
                     filename = os.path.join(root, file)
                     if files_to_recalculate is not None:
                         recalculate = re.search(regex_real_file_path, filename).group(1).replace("\\", "/") in files_to_recalculate
-                    else:
-                        recalculate = False
                     transformed_text = self.__transform_code_into_text(filename, recalculate)
                     score = self.__text_similarity_scikit(transformed_text, text)
                     s1.append([filename, score[0][1]])
