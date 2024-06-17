@@ -95,7 +95,7 @@ class Algorithmic(SemanticTest):
         
         Returns:
             str: The text representation of the code in the file."""
-        if recalculate is False:
+        if recalculate is None:
             cached_text = self.embedding_db.get_embedding(filename)
             if cached_text is not None:
                 return cached_text
@@ -154,7 +154,7 @@ class Algorithmic(SemanticTest):
         Returns:
             list: A list of tuples, where the first element is the file path and the second element is the similarity score."""
         s1 = []
-        recalculate = False
+        recalculate = None
         regex_real_file_path = fr"\.\/test\/{self.repoName}\\(.+)"
         function_bar = IncrementalBar(f"Generating semantic token via Algorithmic", max=sum(len(files) for _, _, files in os.walk(self.path_repos)))
         
