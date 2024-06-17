@@ -26,7 +26,21 @@ from utils.missingFileException import MissingFileException
 logging.basicConfig(filename='logs.log', level=logging.DEBUG)
 
 @inject
-def configure_session(container: Container):
+def __configure_session(container: Container):
+    """Configures the SQLite database session and dependency injection container for the application.
+
+    This function sets up the SQLite database connection, creates a session factory, and configures the dependency injection container with the necessary components:
+
+    - SQLite database interface
+    - GitHub API factory
+    - Semantic code analysis components (CodeT5, Algorithmic)
+    - Embedding components (EmbeddingT5, EmbeddingAlg)
+
+    The function uses environment variables to retrieve the SQLite database path and GitHub API token. It also sets up the database schema using the `setup_db` function.
+
+    The configured container is then returned, allowing the application to use the various components through dependency injection.
+    """
+    
     try:
         engine = db.create_engine("sqlite:///" + os.getenv("SQLITE_PATH"))
     except ArgumentError as e:
@@ -134,6 +148,18 @@ def get_data_repo(repository_name):
 @click.option('--nb_result', envvar='NB_RESULT', default=os.getenv('NB_RESULT'), help='Number of results to return')
 @inject
 def semantic_test_repo(repository_name, nb_result):
+    """Runs a semantic test on a given GitHub repository.
+
+    This function retrieves the text and SHA values for each issue in the specified repository, and then performs a semantic test on the code changes associated with each issue.
+    The results of the test are stored in a SQLite database.
+
+    Parameters:
+        repository_name (str): The name of the GitHub repository to test.
+        nb_result (int): The number of top results to display for each issue.
+
+    Returns:
+        None"""
+    
     text_and_shas = sqlite.get_shas_texts_and_issueId(repository_name)
     path = semantic.init_repo(repository_name, embedding)
     
@@ -165,6 +191,17 @@ def semantic_test_repo(repository_name, nb_result):
 @click.command()
 @inject
 def test():
+    """Runs a test command and checks for a specific error pattern in the output.
+
+    This function performs the following steps:
+    1. Activates the virtual environment using the `activate_command`.
+    2. Runs the `main.py semantic-test-repo` command and captures the output.
+    3. Checks the output for the error pattern "Token indices sequence length is longer than the specified maximum sequence length for this model".
+    4. If the error pattern is found, it prints "Error detected: token too long", otherwise it prints "No error detected".
+    5. Finally, it cleans up the embedding.
+
+    This function is likely used for testing or debugging purposes, to ensure that the semantic test command is running without encountering the specified error."""
+    
     activate_command = "cd .venv/Scripts && activate.bat && cd ../.."
     run_command = "python main.py semantic-test-repo"
 
@@ -199,7 +236,7 @@ cli.add_command(test)
 
 if __name__ == "__main__":
     container = Container()
-    configure_session(container)
+    __configure_session(container)
     
     sqlite = container.db_interface()
     githubFactory = container.git_factory()

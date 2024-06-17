@@ -20,6 +20,14 @@ class CodeT5(SemanticTest):
         self.bert = SentenceTransformer(os.getenv('SENTENCE_TRANSFORMER'))
     
     def init_repo(self, repoFullName: str, embedding):
+        """Initializes the repository path and other related attributes for the CodeT5 class.
+        
+        Args:
+            repoFullName (str): The full name of the repository in the format "owner/repo".
+            embedding (Embedding): The embedding object to be used for the repository.
+        
+        Returns:
+            str: The path to the repository directory."""
         self.repoName = repoFullName.split("/")[-1]
         self.path_repos = f"./test/{self.repoName}"
         self.regex_real_file_path = fr"\.\/test\/{self.repoName}\\(.+)"
@@ -75,6 +83,13 @@ class CodeT5(SemanticTest):
             return astunparse.unparse(node)
     
     def __embed_code(self, recompute_files = None):
+        """Embeds the source code of all Python functions found in the repository directory into a vector representation.
+        
+        This method recursively walks through the repository directory and extracts the source code of all Python functions. It then generates an embedding for each function using a pre-trained language model (CodeT5) and stores the embeddings in a database.
+        
+        If the `recompute_files` parameter is provided, the method will recompute the embeddings for the specified files. Otherwise, it will only compute embeddings for files that do not have an existing embedding in the database.
+        
+        The generated embeddings are stored in the `self.embedding_db` attribute, which can be used to retrieve the embeddings later."""
         if recompute_files is None:
             recompute_files = []
         self.functions_sources = []
@@ -94,6 +109,17 @@ class CodeT5(SemanticTest):
                 self.embedding_db.save_embedding(file_path, function_name, code_embedding)
     
     def __compute_similarity(self, text_issue: str):
+        """Computes the similarity between a given text issue and the source code of all functions in the repository.
+        
+        This method iterates through the list of function sources, retrieves the corresponding code embeddings from the database,
+        and computes the cosine similarity between the issue embedding and the code embedding.
+        The results are sorted in descending order by similarity and returned.
+        
+        Args:
+            text_issue (str): The text of the issue for which to compute the similarity.
+        
+        Returns:
+            list: A list of tuples, where each tuple contains the file path and the similarity score for a function."""
         result_similarity = []
         function_bar = IncrementalBar(f"Generating semantic token via LLM", max=len(self.functions_sources))
         
