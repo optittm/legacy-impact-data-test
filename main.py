@@ -54,12 +54,12 @@ def configure_session(container: Container):
     )
     container.semantic_test.override(
         providers.Factory(
-            Algorithmic # CodeT5, Algorithmic or AIGEN (AIGEN not implemented yet)
+            CodeT5 # CodeT5, Algorithmic or AIGEN (AIGEN not implemented yet)
         )
     )
     container.db_embedding.override(
         providers.Singleton(
-            EmbeddingAlg # EmbeddingT5, EmbeddingAlg or EmbeddingGen (EmbeddingGen not implemented yet)
+            EmbeddingT5 # EmbeddingT5, EmbeddingAlg or EmbeddingGen (EmbeddingGen not implemented yet)
         )
     )
 
@@ -131,30 +131,36 @@ def get_data_repo(repository_name):
 
 @click.command()
 @click.option('--repository_name', envvar='REPOSITORY_NAME', default=os.getenv('REPOSITORY_NAME'), help='Name of the repository')
+@click.option('--nb_result', envvar='NB_RESULT', default=os.getenv('NB_RESULT'), help='Number of results to return')
 @inject
-def semantic_test_repo(repository_name):
+def semantic_test_repo(repository_name, nb_result):
     text_and_shas = sqlite.get_shas_texts_and_issueId(repository_name)
     path = semantic.init_repo(repository_name, embedding)
+    
     for title, body, sha, issueId in text_and_shas:
         if sqlite.issue_exists(issueId):
             logging.info(f"Issue {issueId} has already been treated. Skipping...")
             continue
         
         start = default_timer()
-        
         file_diff = githubFactory.setup_repo(sha, repository_name, path)
         results = semantic.get_max_file_score_from_issue(title.join(', ' + body), file_diff)
-        try: fileId = sqlite.get_file_id_by_filename(results[0], sqlite.get_repoId_from_repoName(repository_name))
-        except MissingFileException:
-            logging.warning(f"No file found with name {results[0]} in repo {repository_name}")
-            fileId = 0
-        testResult = TestResult(score = results[1], issueId = issueId, gitFileId = fileId)
         
+        for i in range(int(nb_result)):
+            print(f"the {i+1} result is {results[i][0]} with a score of {results[i][1]}")
+        
+        for result in results:
+            try:
+                fileId = sqlite.get_file_id_by_filename(result[0], sqlite.get_repoId_from_repoName(repository_name))
+                result[0] = fileId
+            except MissingFileException:
+                logging.warning(f"No file found with name {result[0]} in repo {repository_name}")
+                fileId = 0
+        
+        testResult = TestResult(issueId = issueId, results_array = str(results))
         sqlite.insert(testResult)
-        
         end = default_timer()
         logging.info(f"duration of the test: {end - start}")
-    
     
 @click.command()
 @inject

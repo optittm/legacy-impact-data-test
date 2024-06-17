@@ -131,11 +131,7 @@ class Algorithmic(SemanticTest):
         function_bar.finish()
         
         for input in s1:
-            if max_score < input[1]:
-                max_score = input[1]
-                max_input = input[0]
-        
-        match = re.search(regex_real_file_path, max_input).group(1).replace("\\", "/")
-        return match, max_score
+            input[0] = re.search(regex_real_file_path, input[0]).group(1).replace("\\", "/")
+        return sorted(s1, key=lambda x: x[1], reverse=True)
     
     

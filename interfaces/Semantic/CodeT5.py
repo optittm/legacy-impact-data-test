@@ -35,10 +35,10 @@ class CodeT5(SemanticTest):
         
         Returns:
             Tuple[str, float]: The relative file path of the most similar code and the maximum semantic similarity score."""
-        self.__embed_and_store_code(recompute_files)
+        self.__embed_code(recompute_files)
         return self.__compute_similarity(text_issue)
     
-    def __embed_code(self):
+    def __separate_functions(self):
         """Recursively walks through the repository directory and extracts the source code of all Python functions found in the files.
     
         The extracted function source code is stored in the `self.functions_sources` list, where each element is a list containing the file path and the function source code."""
@@ -74,12 +74,12 @@ class CodeT5(SemanticTest):
         if isinstance(node, ast.FunctionDef):
             return astunparse.unparse(node)
     
-    def __embed_and_store_code(self, recompute_files = None):
+    def __embed_code(self, recompute_files = None):
         if recompute_files is None:
             recompute_files = []
         self.functions_sources = []
         
-        self.__embed_code()
+        self.__separate_functions()
 
         for function_source in self.functions_sources:
             file_path = re.search(self.regex_real_file_path, function_source[0]).group(1).replace("\\", "/")
@@ -94,8 +94,7 @@ class CodeT5(SemanticTest):
                 self.embedding_db.save_embedding(file_path, function_name, code_embedding)
     
     def __compute_similarity(self, text_issue: str):
-        file = ''
-        max_similitude = float('-inf')
+        result_similarity = []
         function_bar = IncrementalBar(f"Generating semantic token via LLM", max=len(self.functions_sources))
         
         for function_source in self.functions_sources:
@@ -108,16 +107,14 @@ class CodeT5(SemanticTest):
                 code_embedding = self.embedding_db.get_embedding(file_path, function_name)
                 if code_embedding is not None:
                     similarity = util.pytorch_cos_sim(issue_embedding, code_embedding).item()
-                    if max_similitude < similarity:
-                        max_similitude = similarity
-                        file = file_path
-
+                    result_similarity.append([file_path, similarity])
+                    
                     torch.cuda.empty_cache()
             except Exception as e:
                 logging.error(f"Error processing {file_path}: {e}")
                 torch.cuda.empty_cache()
         
         function_bar.finish()
-        return file, max_similitude
+        return sorted(result_similarity, key=lambda x: x[1], reverse=True)
     
     
