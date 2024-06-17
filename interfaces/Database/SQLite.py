@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from interfaces.DbInterface import DbInterface
+from interfaces.Database.DbInterface import DbInterface
 from models.repository import Repository
 from models.issue import Issue
 from models.pullRequest import PullRequest
@@ -8,7 +8,7 @@ from models.modifiedFiles import ModifiedFiles
 from models.gitFile import GitFile
 from models.comment import Comment
 from models.testResult import TestResult
-from sqlalchemy import update, select
+from sqlalchemy import update, select, func
 from typing import List
 from utils.missingFileException import MissingFileException
 
@@ -80,7 +80,6 @@ class SQLite(DbInterface):
         stmt = select(Issue.title, Issue.body, PullRequest.shaBase, Issue.id).where(PullRequest.issueId == Issue.id).where(Issue.repositoryId == self.get_repoId_from_repoName(repositoryName))
         return(self.session.execute(stmt).fetchall())
     
-    
     def get_repoId_from_repoName(self, repositoryName: str):
         """Retrieves the database ID of a repository by its full name.
     
@@ -91,3 +90,8 @@ class SQLite(DbInterface):
             int: The database ID of the repository."""
         stmt = select(Repository.id).where(Repository.fullName == repositoryName)
         return(self.session.execute(stmt).fetchone()[0])
+    
+    def issue_exists(self, issueId: int) -> bool:
+        stmt = select(func.count(TestResult.issueId)).where(TestResult.issueId == issueId)
+        result = self.session.execute(stmt).scalar()
+        return result > 0

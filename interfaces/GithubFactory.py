@@ -1,6 +1,7 @@
 import logging
 import re
 import os
+import subprocess
 
 from interfaces.AbcFactoryGit import AbcFactoryGit
 from models.repository import Repository
@@ -19,6 +20,7 @@ class GithubFactory(AbcFactoryGit):
         self.g = g
         self.file_id = 0
         self.db = db
+        self.previousSha = 0
     
     def get_issue(self, number: int):
         """Gets an issue from the Github API.
@@ -216,19 +218,33 @@ class GithubFactory(AbcFactoryGit):
             if i == int(nb_repo):
                 break
     
-    def create_test_repo(self, shaBase, repoFullName: str, path_repos: str):
-        """Creates a test repository by cloning the repository specified by `self.repoFullName` and checking out the base commit specified by `shaBase`.
-        
-        If the test repository directory does not exist, it will be created under the `./test` directory. The repository will then be cloned from the specified URL and the base commit will be checked out.
+    def setup_repo(self, shaBase, repoFullName: str, path_repos: str):
+        """Sets up a local repository clone, checks out the specified base commit SHA, and returns the list of files that have changed between the base commit and the previous commit.
         
         Parameters:
-            shaBase : The commit hash of the base commit to check out in the test repository."""
+            shaBase (str): The commit SHA of the base commit to check out.
+            repoFullName (str): The full name of the GitHub repository in the format "user/repo".
+            path_repos (str): The local path where the repository should be cloned.
+        
+        Returns:
+            list[str]: The list of file paths that have changed between the base commit and the previous commit."""
+            
         if not os.path.exists(path_repos):
             if not os.path.exists("./test"):
                 os.mkdir("./test")
             os.system(f"cd ./test && git clone https://github.com/{repoFullName}")
         
+        return self.__get_file_diff(shaBase, path_repos)
+    
+    def __get_file_diff(self, shaBase, path_repos):
         os.system(f"cd {path_repos} && git checkout {shaBase}")
+        if self.previousSha == 0:
+            self.previousSha = shaBase
+            return None
+        else:
+            command = f"cd ./test/gpt-pilot/ && git diff --name-only {shaBase} {self.previousSha}"
+            commandReturn = subprocess.run(command, shell=True, capture_output=True, text=True)
+            return commandReturn.stdout.strip().split('\n')
     
     def __find_issues_ids_in_text(self, text):
         """Gets issue ids from pr text.
