@@ -102,12 +102,17 @@ class CodeT5(SemanticTest):
             
             if file_path in recompute_files or self.embedding_db.get_embedding(file_path, function_name) is None:
                 input_ids = self.tokenizer(function_source[1], return_tensors="pt").input_ids.to(self.device)
+                
+                if len(input_ids[0]) > self.tokenizer.model_max_length:
+                    logging.warning(f"Function {file_path}/{function_name} is too large for the model. Skipping...")
+                    continue
+
                 generated_ids = self.codeT5.generate(input_ids, max_length=20)
                 function_source.append(self.tokenizer.decode(generated_ids[0], skip_special_tokens=True))
-                
+
                 code_embedding = self.bert.encode(function_source[2], convert_to_tensor=True, show_progress_bar=False)
                 self.embedding_db.save_embedding(file_path, function_name, code_embedding)
-    
+
     def __compute_similarity(self, text_issue: str):
         """Computes the similarity between a given text issue and the source code of all functions in the repository.
         
