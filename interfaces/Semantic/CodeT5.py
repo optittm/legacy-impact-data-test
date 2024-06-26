@@ -104,7 +104,13 @@ class CodeT5(SemanticTest):
                 input_ids = self.tokenizer(function_source[1], return_tensors="pt").input_ids.to(self.device)
                 
                 if len(input_ids[0]) > self.tokenizer.model_max_length:
-                    logging.warning(f"Function {file_path}/{function_name} is too large for the model. Skipping...")
+                    function_segments = self.__separate_loops(function_source[1])
+                    if function_segments == [] :
+                        continue
+                    i = 0
+                    for segment in function_segments:
+                        i += 1
+                        self.functions_sources.append([function_source[0], "def " + str(function_name) + str(i) + str(segment)])
                     continue
 
                 generated_ids = self.codeT5.generate(input_ids, max_length=20)
@@ -147,5 +153,57 @@ class CodeT5(SemanticTest):
         
         function_bar.finish()
         return sorted(result_similarity, key=lambda x: x[1], reverse=True)
+    
+    def __separate_loops(self, function: str):
+        try:
+            tree = ast.parse(function)
+        except:
+            logging.error(f"Error parsing {function}")
+            return []
+
+        class LoopVisitor(ast.NodeVisitor):
+            def __init__(self):
+                self.loops = []
+                self.nested_loops = set()
+            
+            def visit_For(self, node):
+                self.loops.append(node)
+                self.generic_visit(node)
+            
+            def visit_While(self, node):
+                self.loops.append(node)
+                self.generic_visit(node)
+            
+            def visit(self, node):
+                if isinstance(node, (ast.For, ast.While)):
+                    parent = getattr(node, 'parent', None)
+                    if parent and isinstance(parent, (ast.For, ast.While, ast.Try)):
+                        self.nested_loops.add(node)
+                super().visit(node)
+        
+        def set_parents(node, parent=None):
+            for child in ast.iter_child_nodes(node):
+                child.parent = parent
+                set_parents(child, child)
+        
+        set_parents(tree)
+        visitor = LoopVisitor()
+        visitor.visit(tree)
+        top_level_loops = [loop for loop in visitor.loops if loop not in visitor.nested_loops]
+        func_def = tree.body[0]
+        source_lines = function.splitlines()
+        segments = []
+        prev_end_lineno = func_def.lineno - 1
+        
+        for loop in top_level_loops:
+            start_lineno = loop.lineno - 1
+            end_lineno = loop.end_lineno
+            segments.append("\n".join(source_lines[prev_end_lineno:start_lineno]))
+            segments.append("\n".join(source_lines[start_lineno:end_lineno]))
+            prev_end_lineno = end_lineno
+        
+        segments.append("\n".join(source_lines[prev_end_lineno:]))
+        segments = [segment for segment in segments if segment.strip()]
+        return segments
     
     
