@@ -57,19 +57,24 @@ class CodeT5(SemanticTest):
                     with open(file_path, "r", encoding="utf-8") as f:
                         file_content = f.read()
                     
-                    parsed_tree = ast.parse(file_content)
-                    functions = [
-                        self.__extract_function_source(node)
-                        for node in ast.walk(parsed_tree)
-                        if isinstance(node, ast.FunctionDef)
-                    ]
+                    try:
+                        parsed_tree = ast.parse(file_content)
+                        functions = [
+                            self.__extract_function_source(node)
+                            for node in ast.walk(parsed_tree)
+                            if isinstance(node, ast.FunctionDef)
+                        ]
+                        
+                        if functions:
+                            for function in functions:
+                                self.functions_sources.append([
+                                    file_path,
+                                    function
+                                ])
                     
-                    if functions:
-                        for function in functions:
-                            self.functions_sources.append([
-                                file_path,
-                                function
-                            ])
+                    except:
+                        self.functions_sources = []
+                        return
     
     def __extract_function_source(self, node):
         """Extracts the source code of a Python function from an AST node.

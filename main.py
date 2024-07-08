@@ -172,8 +172,9 @@ def semantic_test_repo(repository_name, nb_result):
         file_diff = githubFactory.setup_repo(sha, repository_name, path)
         results = semantic.get_max_file_score_from_issue(title.join(', ' + body), file_diff)
         
-        for i in range(int(nb_result)):
-            print(f"the {i+1} result is {results[i][0]} with a score of {results[i][1]}")
+        if results:
+            for i in range(int(nb_result)):
+                print(f"the {i+1} result is {results[i][0]} with a score of {results[i][1]}")
         
         for result in results:
             try:
