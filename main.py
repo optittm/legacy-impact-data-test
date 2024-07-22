@@ -188,52 +188,10 @@ def semantic_test_repo(repository_name, nb_result):
         sqlite.insert(testResult)
         end = default_timer()
         logging.info(f"duration of the test: {end - start}")
-    
-@click.command()
-@inject
-def test():
-    """Runs a test command and checks for a specific error pattern in the output.
-
-    This function performs the following steps:
-    1. Activates the virtual environment using the `activate_command`.
-    2. Runs the `main.py semantic-test-repo` command and captures the output.
-    3. Checks the output for the error pattern "Token indices sequence length is longer than the specified maximum sequence length for this model".
-    4. If the error pattern is found, it prints "Error detected: token too long", otherwise it prints "No error detected".
-    5. Finally, it cleans up the embedding.
-
-    This function is likely used for testing or debugging purposes, to ensure that the semantic test command is running without encountering the specified error."""
-    
-    activate_command = "cd .venv/Scripts && activate.bat && cd ../.."
-    run_command = "python main.py semantic-test-repo"
-
-    # Run activation command and capture output
-    process = subprocess.Popen(activate_command, shell=True, text=True)
-    process.communicate()
-
-    if process.returncode != 0:
-        print("Activation failed. Exiting.")
-        return
-
-    # Run main.py command and capture output
-    process = subprocess.Popen(run_command, stderr=subprocess.PIPE, shell=True, text=True)
-    _, stderr = process.communicate()
-    error_pattern = "Token indices sequence length is longer than the specified maximum sequence length for this model"
-
-    for line in stderr.splitlines():
-        line = line.strip()
-        print(line)
-        if line.startswith(error_pattern):
-            print("Error detected: token too long")
-            #break
-        else:
-            print("No error detected")
-    
-    embedding.clean()
 
 cli.add_command(semantic_test_repo)
 cli.add_command(get_data_repo)
 cli.add_command(find_repo)
-cli.add_command(test)
 
 if __name__ == "__main__":
     container = Container()

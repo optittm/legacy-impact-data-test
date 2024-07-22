@@ -30,6 +30,7 @@ class EmbeddingT5(EmbeddingDbI):
         
         Returns:
             bytes or None: The embedding data if found, otherwise None."""
+        
         stmt = select(Embeddings1.embedding).where((Embeddings1.file_path == file_path) & (Embeddings1.function_name == function_name))
         results = self.conn.execute(stmt)
         self.conn.commit()
@@ -49,6 +50,7 @@ class EmbeddingT5(EmbeddingDbI):
         This method first checks if an embedding already exists in the database for the given file_path and function_name.
         If an existing embedding is found, it updates the embedding data.
         If no existing embedding is found, it inserts a new record into the database."""
+        
         new = insert(Embeddings1).values(file_path=file_path, function_name=function_name, embedding=pickle.dumps(embedding))
         old = update(Embeddings1).where((Embeddings1.file_path == file_path) & (Embeddings1.function_name == function_name)).values(embedding=pickle.dumps(embedding))
         sel = self.conn.execute(select(Embeddings1).where((Embeddings1.file_path == file_path) & (Embeddings1.function_name == function_name)))
@@ -62,5 +64,6 @@ class EmbeddingT5(EmbeddingDbI):
         
         This method is used to clean up the EmbeddingT5 class instance by closing the database connection and deleting the SQLite database file.
         It should be called when the EmbeddingT5 instance is no longer needed to free up system resources."""
+        
         self.conn.close()
         os.remove("./Embeddings1.db")

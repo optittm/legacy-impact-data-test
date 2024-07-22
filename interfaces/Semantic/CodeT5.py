@@ -4,6 +4,7 @@ import astunparse
 import os
 import re
 import torch
+import csv
 
 from interfaces.Semantic.SemanticTest import SemanticTest
 from sentence_transformers import SentenceTransformer, util
@@ -28,6 +29,7 @@ class CodeT5(SemanticTest):
         
         Returns:
             str: The path to the repository directory."""
+        
         self.repoName = repoFullName.split("/")[-1]
         self.path_repos = f"./test/{self.repoName}"
         self.regex_real_file_path = fr"\.\/test\/{self.repoName}\\(.+)"
@@ -43,6 +45,7 @@ class CodeT5(SemanticTest):
         
         Returns:
             Tuple[str, float]: The relative file path of the most similar code and the maximum semantic similarity score."""
+        
         self.__embed_code(recompute_files)
         return self.__compute_similarity(text_issue)
     
@@ -50,6 +53,7 @@ class CodeT5(SemanticTest):
         """Recursively walks through the repository directory and extracts the source code of all Python functions found in the files.
     
         The extracted function source code is stored in the `self.functions_sources` list, where each element is a list containing the file path and the function source code."""
+        
         for root, _, files in os.walk(self.path_repos):
             for file in files:
                 if file.endswith(".py"):
@@ -84,6 +88,7 @@ class CodeT5(SemanticTest):
         
         Returns:
             str: The source code of the function."""
+        
         if isinstance(node, ast.FunctionDef):
             return astunparse.unparse(node)
     
@@ -95,11 +100,16 @@ class CodeT5(SemanticTest):
         If the `recompute_files` parameter is provided, the method will recompute the embeddings for the specified files. Otherwise, it will only compute embeddings for files that do not have an existing embedding in the database.
         
         The generated embeddings are stored in the `self.embedding_db` attribute, which can be used to retrieve the embeddings later."""
+
         if recompute_files is None:
             recompute_files = []
         self.functions_sources = []
         
         self.__separate_functions()
+
+        # with open('function_lengths.csv', 'w', newline='') as csvfile:
+        #     writer = csv.writer(csvfile)
+        #     writer.writerow(['Function', 'Length Tokens'])
 
         for function_source in self.functions_sources:
             file_path = re.search(self.regex_real_file_path, function_source[0]).group(1).replace("\\", "/")
@@ -110,6 +120,11 @@ class CodeT5(SemanticTest):
                 
                 if len(input_ids[0]) > self.tokenizer.model_max_length:
                     function_segments = self.__separate_loops(function_source[1])
+                    
+                    # with open('function_lengths.csv', 'a', newline='') as csvfile:
+                    #     writer = csv.writer(csvfile)
+                    #     writer.writerow([function_source[1], len(input_ids[0])])
+                    
                     if function_segments == [] :
                         continue
                     i = 0
@@ -136,6 +151,7 @@ class CodeT5(SemanticTest):
         
         Returns:
             list: A list of tuples, where each tuple contains the file path and the similarity score for a function."""
+        
         result_similarity = []
         function_bar = IncrementalBar(f"Generating semantic token via LLM", max=len(self.functions_sources))
         
@@ -160,6 +176,17 @@ class CodeT5(SemanticTest):
         return sorted(result_similarity, key=lambda x: x[1], reverse=True)
     
     def __separate_loops(self, function: str):
+        """Separates the top-level loops in a given function into individual segments.
+        
+        This method takes a function as input, parses it using the `ast` module, and then visits the AST to identify the top-level loops (for and while loops) in the function.
+        It then extracts the source code for each top-level loop and returns a list of these segments.
+        
+        Args:
+            function (str): The function to be processed.
+        
+        Returns:
+            list: A list of strings, where each string represents a segment of the function containing a top-level loop."""
+        
         try:
             tree = ast.parse(function)
         except:
