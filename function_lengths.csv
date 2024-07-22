@@ -1,0 +1,1278 @@
+Function,Length
+"
+
+def send_message(self, prompt_path=None, prompt_data=None, function_calls: FunctionCallSet=None):
+    '\n        Sends a message in the conversation.\n\n        Args:\n            prompt_path: The path to a prompt.\n            prompt_data: Data associated with the prompt.\n            function_calls: Optional function calls to be included in the message.\n\n        Returns:\n            The response from the agent.\n        '
+    self.construct_and_add_message_from_prompt(prompt_path, prompt_data)
+    if (self.agent.__class__.__name__ == 'Developer'):
+        self.agent.project.llm_req_num += 1
+    development_step = get_saved_development_step(self.agent.project)
+    if ((development_step is not None) and self.agent.project.skip_steps):
+        print(yellow(f'Restoring development step with id {development_step.id}'))
+        self.agent.project.checkpoints['last_development_step'] = development_step
+        self.agent.project.restore_files(development_step.id)
+        response = development_step.llm_response
+        self.messages = development_step.messages
+        if (self.agent.project.skip_until_dev_step and (str(development_step.id) == self.agent.project.skip_until_dev_step)):
+            self.agent.project.skip_steps = False
+            delete_all_subsequent_steps(self.agent.project)
+            if (('delete_unrelated_steps' in self.agent.project.args) and self.agent.project.args['delete_unrelated_steps']):
+                self.agent.project.delete_all_steps_except_current_branch()
+        if development_step.token_limit_exception_raised:
+            raise TokenLimitError(development_step.token_limit_exception_raised)
+    else:
+        try:
+            response = create_gpt_chat_completion(self.messages, self.high_level_step, self.agent.project, function_calls=function_calls)
+        except TokenLimitError as e:
+            save_development_step(self.agent.project, prompt_path, prompt_data, self.messages, '', str(e))
+            raise e
+        if (self.agent.__class__.__name__ == 'Developer'):
+            development_step = save_development_step(self.agent.project, prompt_path, prompt_data, self.messages, response)
+    if (response == {}):
+        logger.error('Aborting with ""OpenAI API error happened""')
+        raise Exception('OpenAI API error happened.')
+    response = parse_agent_response(response, function_calls)
+    message_content = (response[0] if (type(response) == tuple) else response)
+    if isinstance(message_content, list):
+        if ('to_message' in function_calls):
+            string_response = function_calls['to_message'](message_content)
+        elif ((len(message_content) > 0) and isinstance(message_content[0], dict)):
+            string_response = [(f'''#{i}
+''' + array_of_objects_to_string(d)) for (i, d) in enumerate(message_content)]
+        else:
+            string_response = [('- ' + r) for r in message_content]
+        message_content = '\n'.join(string_response)
+    logger.info('\n>>>>>>>>>> Assistant Prompt >>>>>>>>>>\n%s\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>', message_content)
+    self.messages.append({'role': 'assistant', 'content': message_content})
+    self.log_message(message_content)
+    return response
+",914
+"
+
+def execute_command(project, command, timeout=None, success_message=None, process_name: str=None, force=False) -> (str, str, int):
+    ""\n    Execute a command and capture its output.\n\n    Args:\n        project: The project associated with the command.\n        command (str): The command to run.\n        timeout (int, optional): The maximum execution time in milliseconds. Default is None.\n        success_message: A message to look for in the output of the command to determine if successful or not.\n        process_name (str, optional): A name for the process.\n                            If `timeout` is not provided, can be used to terminate the process.\n        force (bool, optional): Whether to execute the command without confirmation. Default is False.\n\n    Returns:\n        cli_response (str): The command output\n                            or: '', 'DONE' if user answered 'no' or 'skip'\n        llm_response (str): 'DONE' if 'no', 'skip' or `success_message` matched.\n                            Otherwise `None` - caller should send `cli_response` to LLM\n        exit_code (int): The exit code of the process.\n    ""
+    if (timeout is not None):
+        if (timeout < 0):
+            timeout = None
+        else:
+            if (timeout < 1000):
+                timeout *= 1000
+            timeout = min(max(timeout, MIN_COMMAND_RUN_TIME), MAX_COMMAND_RUN_TIME)
+    if (not force):
+        print(yellow_bold('\n--------- EXECUTE COMMAND ----------'))
+        question = f'Can I execute the command: `{yellow_bold(command)}`'
+        if (timeout is not None):
+            question += f' with {timeout}ms timeout?'
+        else:
+            question += '?'
+        answer = ask_user(project, question, False, hint='If yes, just press ENTER')
+        print(('answer: ' + answer))
+        if (answer == 'no'):
+            return ('', 'DONE', None)
+        elif (answer == 'skip'):
+            return ('', 'DONE', None)
+    if (('cd ' in command) or ('source ' in command)):
+        command = ((""bash -c '"" + command) + ""'"")
+    project.command_runs_count += 1
+    command_run = get_saved_command_run(project, command)
+    if ((command_run is not None) and project.skip_steps):
+        project.checkpoints['last_command_run'] = command_run
+        print(yellow(f'''Restoring command run response id {command_run.id}:
+```
+{command_run.cli_response}```'''))
+        return (command_run.cli_response, None, None)
+    return_value = None
+    was_success = None
+    q_stderr = queue.Queue()
+    q = queue.Queue()
+    process = run_command(command, project.root_path, q, q_stderr)
+    if (process_name is not None):
+        terminate_named_process(process_name)
+        running_processes[process_name] = (command, process.pid)
+    output = ''
+    stderr_output = ''
+    start_time = time.time()
+    try:
+        while True:
+            elapsed_time = (time.time() - start_time)
+            if (process.poll() is not None):
+                time.sleep(0.1)
+                while (not q.empty()):
+                    output_line = q.get_nowait()
+                    if (output_line not in output):
+                        print((green('CLI OUTPUT:') + output_line), end='')
+                        logger.info(('CLI OUTPUT: ' + output_line))
+                        output += output_line
+                break
+            if ((timeout is not None) and ((elapsed_time * 1000) > timeout)):
+                if (process_name is not None):
+                    logger.info(f'Process ""{process_name}"" running after timeout as pid: {process.pid}')
+                    break
+                raise TimeoutError('Command exceeded the specified timeout.')
+            try:
+                line = q.get_nowait()
+            except queue.Empty:
+                line = None
+            if line:
+                output += line
+                print((green('CLI OUTPUT:') + line), end='')
+                logger.info(('CLI OUTPUT: ' + line))
+                if ((success_message is not None) and (success_message in line)):
+                    logger.info('Success message found: %s', success_message)
+                    was_success = True
+                    break
+            try:
+                stderr_line = q_stderr.get_nowait()
+            except queue.Empty:
+                stderr_line = None
+            if stderr_line:
+                stderr_output += stderr_line
+                print((red('CLI ERROR:') + stderr_line), end='')
+                logger.error(('CLI ERROR: ' + stderr_line))
+    except (KeyboardInterrupt, TimeoutError) as e:
+        if isinstance(e, KeyboardInterrupt):
+            print('\nCTRL+C detected. Stopping command execution...')
+            logger.info('CTRL+C detected. Stopping command execution...')
+        else:
+            print('\nTimeout detected. Stopping command execution...')
+            logger.warn('Timeout detected. Stopping command execution...')
+        was_success = False
+        terminate_process(process.pid)
+    elapsed_time = (time.time() - start_time)
+    logger.info(f'`{command}` took {round((elapsed_time * 1000))}ms to execute.')
+    if (return_value is None):
+        return_value = ''
+        if (stderr_output != ''):
+            return_value = (('stderr:\n```\n' + stderr_output[0:MAX_COMMAND_OUTPUT_LENGTH]) + '\n```\n')
+        return_value += (('stdout:\n```\n' + output[(- MAX_COMMAND_OUTPUT_LENGTH):]) + '\n```')
+    save_command_run(project, command, return_value)
+    return (return_value, ('DONE' if was_success else None), process.returncode)
+",1454
+"
+
+def run_command_until_success(convo, command, timeout: Union[(int, None)], process_name: Union[(str, None)]=None, success_message=None, additional_message=None, force=False, return_cli_response=False, is_root_task=False):
+    '\n    Run a command until it succeeds or reaches a timeout.\n\n    Args:\n        convo (AgentConvo): The conversation object.\n        command (str): The command to run.\n        timeout (int): The maximum execution time in milliseconds.\n        process_name: A name for the process.\n                      If `timeout` is not provided, can be used to terminate the process.\n        success_message: A message to look for in the output of the command to determine if successful or not.\n        additional_message (str, optional): Additional message to include in the response.\n        force (bool, optional): Whether to execute the command without confirmation. Default is False.\n        return_cli_response (bool, optional): If True, may raise TooDeepRecursionError(cli_response)\n        is_root_task (bool, optional): If True and TokenLimitError is raised, will call `convo.load_branch(reset_branch_id)`\n    '
+    (cli_response, response, exit_code) = execute_command(convo.agent.project, command, timeout=timeout, success_message=success_message, process_name=process_name, force=force)
+    if (response is None):
+        logger.info(f'`{command}` exit code: {exit_code}')
+        if (exit_code is None):
+            response = 'DONE'
+        else:
+            response = convo.send_message('dev_ops/ran_command.prompt', {'cli_response': cli_response, 'command': command, 'additional_message': additional_message, 'exit_code': exit_code})
+            logger.debug(f'LLM response: {response}')
+    if (response != 'DONE'):
+        print(red('Got incorrect CLI response:'))
+        print(cli_response)
+        print(red('-------------------'))
+        reset_branch_id = convo.save_branch()
+        while True:
+            try:
+                return convo.agent.debugger.debug(convo, {'command': command, 'timeout': timeout})
+            except TooDeepRecursionError as e:
+                raise (TooDeepRecursionError(cli_response) if return_cli_response else e)
+            except TokenLimitError as e:
+                if is_root_task:
+                    convo.load_branch(reset_branch_id)
+                else:
+                    raise e
+    else:
+        return {'success': True, 'cli_response': cli_response}
+",649
+"
+
+def __init__(self, args, name=None, description=None, user_stories=None, user_tasks=None, architecture=None, development_plan=None, current_step=None, ipc_client_instance=None, enable_dot_pilot_gpt=True):
+    '\n        Initialize a project.\n\n        Args:\n            args (dict): Project arguments - app_id, (app_type, name), user_id, email, password, step\n            name (str, optional): Project name. Default is None.\n            description (str, optional): Project description. Default is None.\n            user_stories (list, optional): List of user stories. Default is None.\n            user_tasks (list, optional): List of user tasks. Default is None.\n            architecture (str, optional): Project architecture. Default is None.\n            development_plan (str, optional): Development plan. Default is None.\n            current_step (str, optional): Current step in the project. Default is None.\n        '
+    self.args = args
+    self.llm_req_num = 0
+    self.command_runs_count = 0
+    self.user_inputs_count = 0
+    self.checkpoints = {'last_user_input': None, 'last_command_run': None, 'last_development_step': None}
+    self.root_path = ''
+    self.skip_until_dev_step = None
+    self.skip_steps = None
+    self.ipc_client_instance = ipc_client_instance
+    if (current_step is not None):
+        self.current_step = current_step
+    if (name is not None):
+        self.name = name
+    if (description is not None):
+        self.description = description
+    if (user_stories is not None):
+        self.user_stories = user_stories
+    if (user_tasks is not None):
+        self.user_tasks = user_tasks
+    if (architecture is not None):
+        self.architecture = architecture
+    self.dot_pilot_gpt = DotGptPilot(log_chat_completions=enable_dot_pilot_gpt)
+",520
+"
+
+def start(self):
+    '\n        Start the project.\n        '
+    self.project_manager = ProductOwner(self)
+    print(json.dumps({'project_stage': 'project_description'}), type='info')
+    self.project_manager.get_project_description()
+    print(json.dumps({'project_stage': 'user_stories'}), type='info')
+    self.user_stories = self.project_manager.get_user_stories()
+    print(json.dumps({'project_stage': 'architecture'}), type='info')
+    self.architect = Architect(self)
+    self.architecture = self.architect.get_architecture()
+    self.developer = Developer(self)
+    self.developer.set_up_environment()
+    self.tech_lead = TechLead(self)
+    self.development_plan = self.tech_lead.create_development_plan()
+    if ((self.args['step'] is not None) and (STEPS.index(self.args['step']) < STEPS.index('coding'))):
+        clear_directory(self.root_path)
+        delete_all_app_development_data(self.args['app_id'])
+        self.skip_steps = False
+    if ('skip_until_dev_step' in self.args):
+        self.skip_until_dev_step = self.args['skip_until_dev_step']
+        if (self.args['skip_until_dev_step'] == '0'):
+            clear_directory(self.root_path)
+            delete_all_app_development_data(self.args['app_id'])
+            self.skip_steps = False
+        elif (self.skip_until_dev_step is not None):
+            should_overwrite_files = ''
+            while ((should_overwrite_files != 'y') or (should_overwrite_files != 'n')):
+                should_overwrite_files = styled_text(self, f""Do you want to overwrite the dev step {self.args['skip_until_dev_step']} code with system changes? Type y/n"", ignore_user_input_count=True)
+                logger.info('should_overwrite_files: %s', should_overwrite_files)
+                if (should_overwrite_files == 'n'):
+                    break
+                elif (should_overwrite_files == 'y'):
+                    FileSnapshot.delete().where(((FileSnapshot.app == self.app) and (FileSnapshot.development_step == self.skip_until_dev_step))).execute()
+                    self.save_files_snapshot(self.skip_until_dev_step)
+                    break
+    self.dot_pilot_gpt.write_project(self)
+    print(json.dumps({'project_stage': 'coding'}), type='info')
+    self.developer.start_coding()
+",688
+"
+
+def get_full_file_path(self, file_path: str, file_name: str) -> Tuple[(str, str)]:
+    are_windows_paths = (('\\' in file_path) or ('\\' in file_name) or ('\\' in self.root_path))
+    if are_windows_paths:
+        file_name = file_name.replace('\\', '/')
+        file_path = file_path.replace('\\', '/')
+    file_path = file_path.replace('~', '')
+    file_name = file_name.replace('~', '')
+    file_path = file_path.replace(self.root_path, '')
+    file_name = file_name.replace(self.root_path, '')
+    if (('.' not in file_path) and (not file_path.endswith('/'))):
+        file_path += '/'
+    if (('.' not in file_name) and (not file_name.endswith('/'))):
+        file_name += '/'
+    if (('/' in file_path) and (not file_path.startswith('/'))):
+        file_path = ('/' + file_path)
+    if (('/' in file_name) and (not file_name.startswith('/'))):
+        file_name = ('/' + file_name)
+    (head_path, tail_path) = os.path.split(file_path)
+    (head_name, tail_name) = os.path.split(file_name)
+    final_file_path = (head_path if (head_path != '') else head_name)
+    final_file_name = (tail_name if (tail_name != '') else tail_path)
+    if (head_path in head_name):
+        final_file_path = head_name
+    elif (final_file_path != head_name):
+        if ((head_name not in head_path) and (head_path not in head_name)):
+            if ('.' in file_path):
+                final_file_path = (head_name + head_path)
+            else:
+                final_file_path = (head_path + head_name)
+    if (final_file_path == ''):
+        final_file_path = '/'
+    final_absolute_path = (((self.root_path + final_file_path) + '/') + final_file_name)
+    if ('//' in final_absolute_path):
+        final_absolute_path = final_absolute_path.replace('//', '/')
+    if ('//' in final_file_path):
+        final_file_path = final_file_path.replace('//', '/')
+    if are_windows_paths:
+        final_file_path = final_file_path.replace('/', '\\')
+        final_absolute_path = final_absolute_path.replace('/', '\\')
+    return (final_file_path, final_absolute_path)
+",704
+"
+
+@pytest.mark.uses_tokens
+@patch('pilot.helpers.AgentConvo.get_saved_development_step')
+@patch('pilot.helpers.AgentConvo.save_development_step')
+@patch('utils.questionary.get_saved_user_input')
+@patch('utils.questionary.save_user_input')
+@patch('helpers.cli.get_saved_command_run')
+@patch('helpers.cli.run_command')
+@patch('helpers.cli.save_command_run')
+def test_debug(mock_save_command, mock_run_command, mock_get_saved_command, mock_save_input, mock_user_input, mock_save_step, mock_get_saved_step):
+    (builtins.print, ipc_client_instance) = get_custom_print({})
+    project = create_project()
+    project.current_step = 'coding'
+    developer = Developer(project)
+    project.developer = developer
+    convo = AgentConvo(developer)
+    convo.load_branch = (lambda x: None)
+    debugger = Debugger(developer)
+    convo.construct_and_add_message_from_prompt('dev_ops/ran_command.prompt', {'cli_response': ""\nstderr:\n```\nnode:internal/modules/cjs/loader:1080\n  throw err;\n  ^\n\nError: Cannot find module 'mime'\nRequire stack:\n- /workspace/chat_app/node_modules/send/index.js\n- /workspace/chat_app/node_modules/express/lib/utils.js\n- /workspace/chat_app/node_modules/express/lib/application.js\n- /workspace/chat_app/node_modules/express/lib/express.js\n- /workspace/chat_app/node_modules/express/index.js\n- /workspace/chat_app/server.js\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1077:15)\n    at Module._load (node:internal/modules/cjs/loader:922:27)\n    at Module.require (node:internal/modules/cjs/loader:1143:19)\n    at require (node:internal/modules/cjs/helpers:121:18)\n    at Object.<anonymous> (/workspace/chat_app/node_modules/send/index.js:24:12)\n    at Module._compile (node:internal/modules/cjs/loader:1256:14)\n    at Module._extensions..js (node:internal/modules/cjs/loader:1310:10)\n    at Module.load (node:internal/modules/cjs/loader:1119:32)\n    at Module._load (node:internal/modules/cjs/loader:960:12)\n```\nstdout:\n```\n> chat_app@1.0.0 start\n> node server.js\n```        \n""})
+    mock_questionary = MockQuestionary(['', ''])
+    with patch('utils.questionary.questionary', mock_questionary):
+        result = debugger.debug(convo, command={'command': 'npm run start'}, is_root_task=True)
+        assert (result == {'success': True})
+",794
+"
+
+def continue_development(self, iteration_convo, last_branch_name, continue_description=''):
+    while True:
+        logger.info('Continue development: %s', last_branch_name)
+        iteration_convo.load_branch(last_branch_name)
+        user_description = ((('Here is a description of what should be working: \n\n' + blue_bold(continue_description)) + '\n') if (continue_description != '') else '')
+        user_description = ('Can you check if the app works please? ' + user_description)
+        if ((self.project.ipc_client_instance is None) or (self.project.ipc_client_instance.client is None)):
+            user_description += yellow_bold((('\n\nIf you want to run the app, just type ""r"" and press ENTER and that will run `' + self.run_command) + '`'))
+        else:
+            print(self.run_command, type='run_command')
+        response = self.project.ask_for_human_intervention(user_description, cbs={'r': (lambda convo: run_command_until_success(convo, self.run_command, process_name='app', timeout=None, force=True, return_cli_response=True, is_root_task=True))}, convo=iteration_convo, is_root_task=True)
+        logger.info('response: %s', response)
+        user_feedback = (response['user_input'] if ('user_input' in response) else None)
+        if (user_feedback == 'continue'):
+            return {'success': True, 'user_input': user_feedback}
+        if (user_feedback is not None):
+            iteration_convo = AgentConvo(self)
+            iteration_convo.send_message('development/iteration.prompt', {'name': self.project.args['name'], 'app_type': self.project.args['app_type'], 'app_summary': self.project.project_description, 'clarification': [], 'user_stories': self.project.user_stories, 'technologies': self.project.architecture, 'array_of_objects_to_string': array_of_objects_to_string, 'directory_tree': self.project.get_directory_tree(True), 'files': self.project.get_all_coded_files(), 'user_input': user_feedback})
+            task_steps = iteration_convo.send_message('development/parse_task.prompt', {'running_processes': running_processes}, IMPLEMENT_TASK)
+            iteration_convo.remove_last_x_messages(2)
+            return self.execute_task(iteration_convo, task_steps, is_root_task=True)
+",656
+"
+
+def set_up_environment(self):
+    self.project.current_step = ENVIRONMENT_SETUP_STEP
+    self.convo_os_specific_tech = AgentConvo(self)
+    step = get_progress_steps(self.project.args['app_id'], ENVIRONMENT_SETUP_STEP)
+    if (step and (not should_execute_step(self.project.args['step'], ENVIRONMENT_SETUP_STEP))):
+        step_already_finished(self.project.args, step)
+        return
+    user_input = ''
+    while (user_input.lower() != 'done'):
+        user_input = styled_text(self.project, 'Please set up your local environment so that the technologies listed can be utilized. When you\'re done, write ""DONE""')
+    save_progress(self.project.args['app_id'], self.project.current_step, {'os_specific_technologies': [], 'newly_installed_technologies': [], 'app_data': generate_app_data(self.project.args)})
+    return
+    print(green('Setting up the environment...\n'))
+    logger.info('Setting up the environment...')
+    os_info = get_os_info()
+    os_specific_technologies = self.convo_os_specific_tech.send_message('development/env_setup/specs.prompt', {'name': self.project.args['name'], 'app_type': self.project.args['app_type'], 'os_info': os_info, 'technologies': self.project.architecture}, FILTER_OS_TECHNOLOGIES)
+    for technology in os_specific_technologies:
+        logger.info('Installing %s', technology)
+        llm_response = self.install_technology(technology)
+        if (llm_response != 'DONE'):
+            installation_commands = self.convo_os_specific_tech.send_message('development/env_setup/unsuccessful_installation.prompt', {'technology': technology}, EXECUTE_COMMANDS)
+            if (installation_commands is not None):
+                for cmd in installation_commands:
+                    run_command_until_success(self.convo_os_specific_tech, cmd['command'], timeout=cmd['timeout'])
+    logger.info('The entire tech stack is installed and ready to be used.')
+    save_progress(self.project.args['app_id'], self.project.current_step, {'os_specific_technologies': os_specific_technologies, 'newly_installed_technologies': [], 'app_data': generate_app_data(self.project.args)})
+",644
+"
+
+def get_project_description(self):
+    self.project.app = get_app(self.project.args['app_id'], error_if_not_found=False)
+    if (self.project.app is not None):
+        step = get_progress_steps(self.project.args['app_id'], PROJECT_DESCRIPTION_STEP)
+        if (step and (not should_execute_step(self.project.args['step'], PROJECT_DESCRIPTION_STEP))):
+            step_already_finished(self.project.args, step)
+            self.project.set_root_path(setup_workspace(self.project.args))
+            self.project.project_description = step['summary']
+            self.project.project_description_messages = step['messages']
+            return
+    self.project.current_step = PROJECT_DESCRIPTION_STEP
+    if ('app_type' not in self.project.args):
+        self.project.args['app_type'] = ask_for_app_type()
+    if ('name' not in self.project.args):
+        self.project.args['name'] = clean_filename(ask_user(self.project, 'What is the project name?'))
+    self.project.set_root_path(setup_workspace(self.project.args))
+    self.project.app = save_app(self.project)
+    main_prompt = ask_for_main_app_definition(self.project)
+    print(json.dumps({'open_project': {'path': self.project.root_path, 'name': self.project.args['name']}}), type='info')
+    high_level_messages = get_additional_info_from_openai(self.project, generate_messages_from_description(main_prompt, self.project.args['app_type'], self.project.args['name']))
+    print(green_bold('Project Summary:\n'))
+    convo_project_description = AgentConvo(self)
+    high_level_summary = convo_project_description.send_message('utils/summary.prompt', {'conversation': '\n'.join([f""{msg['role']}: {msg['content']}"" for msg in high_level_messages])})
+    save_progress(self.project.args['app_id'], self.project.current_step, {'prompt': main_prompt, 'messages': high_level_messages, 'summary': high_level_summary, 'app_data': generate_app_data(self.project.args)})
+    self.project.project_description = high_level_summary
+    self.project.project_description_messages = high_level_messages
+    return
+",621
+"
+
+@patch('helpers.cli.execute_command', return_value=('stdout:\n```\n\n```', 'DONE', None))
+@patch('helpers.AgentConvo.get_saved_development_step')
+@patch('helpers.AgentConvo.save_development_step')
+@patch('utils.llm_connection.requests.post')
+@patch('utils.questionary.get_saved_user_input')
+def test_test_code_changes_invalid_json(self, mock_get_saved_user_input, mock_requests_post, mock_save, mock_get_saved_step, mock_execute, monkeypatch):
+    monkey = None
+    convo = AgentConvo(self.developer)
+    convo.save_branch = (lambda branch_name=None: branch_name)
+    convo.load_branch = (lambda function_uuid=None: function_uuid)
+    self.project.developer = self.developer
+    types_in_response = ['command', 'wrong_again', 'command_test']
+    json_received = []
+
+    def generate_response(*args, **kwargs):
+        json_received.append(kwargs['json'])
+        gpt_response = json.dumps({'type': types_in_response.pop(0), 'command': {'command': 'node server.js', 'timeout': 3000}})
+        choice = json.dumps({'delta': {'content': gpt_response}})
+        line = json.dumps({'choices': [json.loads(choice)]}).encode('utf-8')
+        response = requests.Response()
+        response.status_code = 200
+        response.iter_lines = (lambda : [line])
+        print(f'##### mock response: {response}')
+        return response
+    mock_requests_post.side_effect = generate_response
+    monkeypatch.setenv('OPENAI_API_KEY', 'secret')
+    result = self.developer.test_code_changes(monkey, convo)
+    assert (result == {'success': True, 'cli_response': 'stdout:\n```\n\n```'})
+    assert (mock_requests_post.call_count == 3)
+    assert (""The JSON is invalid at $.type - 'command' is not one of ['automated_test', 'command_test', 'manual_test', 'no_test']"" in json_received[1]['messages'][3]['content'])
+    assert (mock_execute.call_count == 1)
+",591
+"
+
+def setup_method(self):
+    (builtins.print, ipc_client_instance) = get_custom_print({})
+    name = 'TestTechLead'
+    self.project = Project({'app_id': 'test-tech-lead', 'name': name, 'app_type': ''}, name=name, architecture=[], user_stories=[])
+    self.project.set_root_path(os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../../workspace/TestTechLead')))
+    self.project.technologies = []
+    self.project.project_description = '\nThe project entails creating a web-based chat application, tentatively named ""chat_app."" \nThis application does not require user authentication or chat history storage. \nIt solely supports one-on-one messaging, excluding group chats or multimedia sharing like photos, videos, or files. \nAdditionally, there are no specific requirements for real-time functionality, like live typing indicators or read receipts. \nThe development of this application will strictly follow a monolithic structure, avoiding the use of microservices, as per the client\'s demand. \nThe development process will include the creation of user stories and tasks, based on detailed discussions with the client. \n        '
+    self.project.user_stories = ['User Story 1: As a user, I can access the web-based ""chat_app"" directly without needing to authenticate or log in. Do you want to add anything else? If not, just press ENTER.', 'User Story 2: As a user, I can start one-on-one conversations with another user on the ""chat_app"". Do you want to add anything else? If not, just press ENTER.', 'User Story 3: As a user, I can send and receive messages in real-time within my one-on-one conversation on the ""chat_app"". Do you want to add anything else? If not, just press ENTER.', 'User Story 4: As a user, I do not need to worry about deleting or storing my chats because the ""chat_app"" does not store chat histories. Do you want to add anything else? If not, just press ENTER.', 'User Story 5: As a user, I will only be able to send text messages, as the ""chat_app"" does not support any kind of multimedia sharing like photos, videos, or files. Do you want to add anything else? If not, just press ENTER.', 'User Story 6: As a user, I will not see any live typing indicators or read receipts since the ""chat_app"" does not provide any additional real-time functionality beyond message exchange. Do you want to add anything else? If not, just press ENTER.']
+    self.project.architecture = ['Node.js', 'Socket.io', 'Bootstrap', 'JavaScript', 'HTML5', 'CSS3']
+    self.project.current_step = DEVELOPMENT_PLANNING_STEP
+",700
+"
+
+def get_arguments():
+    args = sys.argv[1:]
+    arguments = {}
+    for arg in args:
+        if ('=' in arg):
+            (key, value) = arg.split('=', 1)
+            arguments[key] = value
+        else:
+            arguments[arg] = True
+    if ('user_id' not in arguments):
+        arguments['user_id'] = username_to_uuid(getuser())
+    app = None
+    if ('workspace' in arguments):
+        app = get_app_by_user_workspace(arguments['user_id'], arguments['workspace'])
+        if (app is not None):
+            arguments['app_id'] = app.id
+    else:
+        arguments['workspace'] = None
+    if ('app_id' in arguments):
+        try:
+            if (app is None):
+                app = get_app(arguments['app_id'])
+            arguments['app_type'] = app.app_type
+            arguments['name'] = app.name
+            if (('step' not in arguments) or (('step' in arguments) and (not should_execute_step(arguments['step'], app.status)))):
+                arguments['step'] = app.status
+            print(green_bold('\n------------------ LOADING PROJECT ----------------------'))
+            print(green_bold(f""{app.name} (app_id={arguments['app_id']})""))
+            print(green_bold('--------------------------------------------------------------\n'))
+        except ValueError as e:
+            print(e)
+            exit(1)
+    else:
+        arguments['app_id'] = str(uuid.uuid4())
+        print(green_bold('\n------------------ STARTING NEW PROJECT ----------------------'))
+        print('If you wish to continue with this project in future run:')
+        print(green_bold(f""python {sys.argv[0]} app_id={arguments['app_id']}""))
+        print(green_bold('--------------------------------------------------------------\n'))
+    if ('email' not in arguments):
+        arguments['email'] = get_email()
+    if ('password' not in arguments):
+        arguments['password'] = 'password'
+    if ('step' not in arguments):
+        arguments['step'] = None
+    return arguments
+",526
+"
+
+def create_gpt_chat_completion(messages: List[dict], req_type, project, function_calls: FunctionCallSet=None):
+    '\n    Called from:\n      - AgentConvo.send_message() - these calls often have `function_calls`, usually from `pilot/const/function_calls.py`\n         - convo.continuous_conversation()\n      - prompts.get_additional_info_from_openai()\n      - prompts.get_additional_info_from_user() after the user responds to each\n            ""Please check this message and say what needs to be changed... {message}""\n    :param messages: [{ ""role"": ""system""|""assistant""|""user"", ""content"": string }, ... ]\n    :param req_type: \'project_description\' etc. See common.STEPS\n    :param project: project\n    :param function_calls: (optional) {\'definitions\': [{ \'name\': str }, ...]}\n        see `IMPLEMENT_CHANGES` etc. in `pilot/const/function_calls.py`\n    :return: {\'text\': new_code}\n        or if `function_calls` param provided\n             {\'function_calls\': {\'name\': str, arguments: {...}}}\n    '
+    gpt_data = {'model': os.getenv('MODEL_NAME', 'gpt-4'), 'n': 1, 'temperature': 1, 'top_p': 1, 'presence_penalty': 0, 'frequency_penalty': 0, 'messages': messages, 'stream': True}
+    if (os.getenv('ENDPOINT') == 'OPENROUTER'):
+        keys_to_delete = ['n', 'max_tokens', 'temperature', 'top_p', 'presence_penalty', 'frequency_penalty']
+        for key in keys_to_delete:
+            if (key in gpt_data):
+                del gpt_data[key]
+    add_function_calls_to_request(gpt_data, function_calls)
+    try:
+        response = stream_gpt_completion(gpt_data, req_type, project)
+        return response
+    except TokenLimitError as e:
+        raise e
+    except Exception as e:
+        logger.error(f""The request to {os.getenv('ENDPOINT')} API failed: %s"", e)
+        print(f""The request to {os.getenv('ENDPOINT')} API failed. Here is the error message:"")
+        print(e)
+        return {}
+",606
+"
+
+def retry_on_exception(func):
+
+    def update_error_count(args):
+        function_error_count = (1 if ('function_error' not in args[0]) else (args[0]['function_error_count'] + 1))
+        args[0]['function_error_count'] = function_error_count
+        return function_error_count
+
+    def set_function_error(args, err_str: str):
+        logger.info(err_str)
+        args[0]['function_error'] = err_str
+        if ('function_buffer' in args[0]):
+            del args[0]['function_buffer']
+
+    def wrapper(*args, **kwargs):
+        wait_duration_ms = None
+        while True:
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                err_str = str(e)
+                if isinstance(e, json.JSONDecodeError):
+                    if (e.msg.startswith('Expecting') or (e.msg == 'Unterminated string starting at')):
+                        if ((e.msg == 'Expecting value') and (len(e.doc) > e.pos)):
+                            err_str = re.split('[},\\\\n]', e.doc[e.pos:])[0]
+                            err_str = f'Invalid value: `{err_str}`'
+                        else:
+                            logger.info('Received incomplete JSON response from LLM. Asking for the rest...')
+                            args[0]['function_buffer'] = e.doc
+                            if ('function_error' in args[0]):
+                                del args[0]['function_error']
+                            continue
+                    function_error_count = update_error_count(args)
+                    logger.warning('Received invalid character in JSON response from LLM. Asking to retry...')
+                    logger.info(f'  received: {e.doc}')
+                    set_function_error(args, err_str)
+                    if (function_error_count < 3):
+                        continue
+                elif isinstance(e, ValidationError):
+                    function_error_count = update_error_count(args)
+                    logger.warning('Received invalid JSON response from LLM. Asking to retry...')
+                    set_function_error(args, f'at {e.json_path} - {e.message}')
+                    if (function_error_count < 3):
+                        continue
+                if ('context_length_exceeded' in err_str):
+                    raise TokenLimitError(get_tokens_in_messages_from_openai_error(err_str), MAX_GPT_MODEL_TOKENS)
+                if ('rate_limit_exceeded' in err_str):
+                    match = re.search('Please try again in (\\d+)ms.', err_str)
+                    if match:
+                        if (wait_duration_ms is None):
+                            wait_duration_ms = int(match.group(1))
+                        elif (wait_duration_ms < 6000):
+                            wait_duration_ms *= 2
+                        logger.debug(f'Rate limited. Waiting {wait_duration_ms}ms...')
+                        time.sleep((wait_duration_ms / 1000))
+                    continue
+                print(red('There was a problem with request to openai API:'))
+                print(err_str)
+                logger.error(f'There was a problem with request to openai API: {err_str}')
+                project = args[2]
+                user_message = styled_text(project, ""Do you want to try make the same request again? If yes, just press ENTER. Otherwise, type 'no'."", style=Style.from_dict({'question': '#FF0000 bold', 'answer': '#FF910A bold'}))
+                if (user_message != ''):
+                    return {}
+    return wrapper
+",888
+"
+
+@retry_on_exception
+def stream_gpt_completion(data, req_type, project):
+    ""\n    Called from create_gpt_chat_completion()\n    :param data:\n    :param req_type: 'project_description' etc. See common.STEPS\n    :param project: NEEDED FOR WRAPPER FUNCTION retry_on_exception\n    :return: {'text': str} or {'function_calls': {'name': str, arguments: '{...}'}}\n    ""
+    try:
+        terminal_width = os.get_terminal_size().columns
+    except OSError:
+        terminal_width = 50
+    lines_printed = 2
+    gpt_response = ''
+    buffer = ''
+    expecting_json = None
+    received_json = False
+    if ('functions' in data):
+        expecting_json = data['functions']
+        if ('function_buffer' in data):
+            incomplete_json = get_prompt('utils/incomplete_json.prompt', {'received_json': data['function_buffer']})
+            data['messages'].append({'role': 'user', 'content': incomplete_json})
+            gpt_response = data['function_buffer']
+            received_json = True
+        elif ('function_error' in data):
+            invalid_json = get_prompt('utils/invalid_json.prompt', {'invalid_reason': data['function_error']})
+            data['messages'].append({'role': 'user', 'content': invalid_json})
+            received_json = True
+        data = {key: value for (key, value) in data.items() if (not key.startswith('function'))}
+
+    def return_result(result_data, lines_printed):
+        if buffer:
+            lines_printed += count_lines_based_on_width(buffer, terminal_width)
+        logger.debug(f'lines printed: {lines_printed} - {terminal_width}')
+        delete_last_n_lines(lines_printed)
+        return result_data
+    model = os.getenv('MODEL_NAME', 'gpt-4')
+    endpoint = os.getenv('ENDPOINT')
+    logger.info(f'> Request model: {model}')
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug('\n'.join([f""{message['role']}: {message['content']}"" for message in data['messages']]))
+    if (endpoint == 'AZURE'):
+        endpoint_url = (((os.getenv('AZURE_ENDPOINT') + '/openai/deployments/') + model) + '/chat/completions?api-version=2023-05-15')
+        headers = {'Content-Type': 'application/json', 'api-key': get_api_key_or_throw('AZURE_API_KEY')}
+    elif (endpoint == 'OPENROUTER'):
+        endpoint_url = os.getenv('OPENROUTER_ENDPOINT', 'https://openrouter.ai/api/v1/chat/completions')
+        headers = {'Content-Type': 'application/json', 'Authorization': ('Bearer ' + get_api_key_or_throw('OPENROUTER_API_KEY')), 'HTTP-Referer': 'https://github.com/Pythagora-io/gpt-pilot', 'X-Title': 'GPT Pilot'}
+        data['max_tokens'] = MAX_GPT_MODEL_TOKENS
+        data['model'] = model
+    else:
+        endpoint_url = os.getenv('OPENAI_ENDPOINT', 'https://api.openai.com/v1/chat/completions')
+        headers = {'Content-Type': 'application/json', 'Authorization': ('Bearer ' + get_api_key_or_throw('OPENAI_API_KEY'))}
+        data['model'] = model
+    response = requests.post(endpoint_url, headers=headers, json=data, stream=True)
+    if (response.status_code != 200):
+        project.dot_pilot_gpt.log_chat_completion(endpoint, model, req_type, data['messages'], response.text)
+        logger.info(f'problem with request (status {response.status_code}): {response.text}')
+        raise Exception(f'API responded with status code: {response.status_code}. Response text: {response.text}')
+    for line in response.iter_lines():
+        if (line and (line != b': OPENROUTER PROCESSING')):
+            line = line.decode('utf-8')
+            if line.startswith('data: '):
+                line = line[6:]
+            if (line == '[DONE]'):
+                continue
+            try:
+                json_line = json.loads(line)
+                if (len(json_line['choices']) == 0):
+                    continue
+                if ('error' in json_line):
+                    logger.error(f'Error in LLM response: {json_line}')
+                    raise ValueError(f""Error in LLM response: {json_line['error']['message']}"")
+                choice = json_line['choices'][0]
+                json_line = choice['delta']
+            except json.JSONDecodeError as e:
+                logger.error(f'Unable to decode line: {line} {e.msg}')
+                continue
+            if ('content' in json_line):
+                content = json_line.get('content')
+                if content:
+                    buffer += content
+                    if buffer.endswith('\n'):
+                        if (expecting_json and (not received_json)):
+                            received_json = assert_json_response(buffer, (lines_printed > 2))
+                        lines_printed += count_lines_based_on_width(buffer, terminal_width)
+                        buffer = ''
+                    gpt_response += content
+                    print(content, type='stream', end='', flush=True)
+    print('\n', type='stream')
+    logger.info('<<<<<<<<<< LLM Response <<<<<<<<<<\n%s\n<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<', gpt_response)
+    project.dot_pilot_gpt.log_chat_completion(endpoint, model, req_type, data['messages'], gpt_response)
+    if expecting_json:
+        gpt_response = clean_json_response(gpt_response)
+        assert_json_schema(gpt_response, expecting_json)
+        project.dot_pilot_gpt.log_chat_completion_json(endpoint, model, req_type, expecting_json, gpt_response)
+    new_code = postprocessing(gpt_response, req_type)
+    return return_result({'text': new_code}, lines_printed)
+",1597
+"
+
+def wrapper(*args, **kwargs):
+    wait_duration_ms = None
+    while True:
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            err_str = str(e)
+            if isinstance(e, json.JSONDecodeError):
+                if (e.msg.startswith('Expecting') or (e.msg == 'Unterminated string starting at')):
+                    if ((e.msg == 'Expecting value') and (len(e.doc) > e.pos)):
+                        err_str = re.split('[},\\\\n]', e.doc[e.pos:])[0]
+                        err_str = f'Invalid value: `{err_str}`'
+                    else:
+                        logger.info('Received incomplete JSON response from LLM. Asking for the rest...')
+                        args[0]['function_buffer'] = e.doc
+                        if ('function_error' in args[0]):
+                            del args[0]['function_error']
+                        continue
+                function_error_count = update_error_count(args)
+                logger.warning('Received invalid character in JSON response from LLM. Asking to retry...')
+                logger.info(f'  received: {e.doc}')
+                set_function_error(args, err_str)
+                if (function_error_count < 3):
+                    continue
+            elif isinstance(e, ValidationError):
+                function_error_count = update_error_count(args)
+                logger.warning('Received invalid JSON response from LLM. Asking to retry...')
+                set_function_error(args, f'at {e.json_path} - {e.message}')
+                if (function_error_count < 3):
+                    continue
+            if ('context_length_exceeded' in err_str):
+                raise TokenLimitError(get_tokens_in_messages_from_openai_error(err_str), MAX_GPT_MODEL_TOKENS)
+            if ('rate_limit_exceeded' in err_str):
+                match = re.search('Please try again in (\\d+)ms.', err_str)
+                if match:
+                    if (wait_duration_ms is None):
+                        wait_duration_ms = int(match.group(1))
+                    elif (wait_duration_ms < 6000):
+                        wait_duration_ms *= 2
+                    logger.debug(f'Rate limited. Waiting {wait_duration_ms}ms...')
+                    time.sleep((wait_duration_ms / 1000))
+                continue
+            print(red('There was a problem with request to openai API:'))
+            print(err_str)
+            logger.error(f'There was a problem with request to openai API: {err_str}')
+            project = args[2]
+            user_message = styled_text(project, ""Do you want to try make the same request again? If yes, just press ENTER. Otherwise, type 'no'."", style=Style.from_dict({'question': '#FF0000 bold', 'answer': '#FF910A bold'}))
+            if (user_message != ''):
+                return {}
+",730
+"
+
+def test_DEVELOPMENT_PLAN(self):
+    assert assert_json_schema('\n{\n  ""plan"": [\n    {\n      ""description"": ""Set up project structure including creation of necessary directories and files. Initialize Node.js and install necessary libraries such as express and socket.io."",\n      ""programmatic_goal"": ""Project structure should be set up and Node.js initialized. Express and socket.io libraries should be installed and reflected in the package.json file."",\n      ""user_review_goal"": ""Developer should be able to start an empty express server by running `npm start` command without any errors.""\n    },\n    {\n      ""description"": ""Create a simple front-end HTML page with CSS and JavaScript that includes input for typing messages and area for displaying messages."",\n      ""programmatic_goal"": ""There should be an HTML file containing an input box for typing messages and an area for displaying the messages. This HTML page should be served when user navigates to the root URL."",\n      ""user_review_goal"": ""Navigating to the root URL (http://localhost:3000) should display the chat front-end with an input box and a message area.""\n    },\n    {\n      ""description"": ""Set up socket.io on the back-end to handle websocket connections and broadcasting messages to the clients."",\n      ""programmatic_goal"": ""Server should be able to handle websocket connections using socket.io and broadcast messages to all connected clients."",\n      ""user_review_goal"": ""By using two different browsers or browser tabs, when one user sends a message from one tab, it should appear in the other user\'s browser tab in real-time.""\n    },\n    {\n      ""description"": ""Integrate front-end with socket.io client to send messages from the input field to the server and display incoming messages in the message area."",\n      ""programmatic_goal"": ""Front-end should be able to send messages to server and display incoming messages in the message area using socket.io client."",\n      ""user_review_goal"": ""Typing a message in the chat input and sending it should then display the message in the chat area.""\n    }\n  ]\n}\n'.strip(), DEVELOPMENT_PLAN['definitions'])
+",518
+"
+
+@patch('utils.llm_connection.requests.post')
+@patch('utils.llm_connection.time.sleep')
+def test_rate_limit_error(self, mock_sleep, mock_post, monkeypatch):
+    monkeypatch.setenv('OPENAI_API_KEY', 'secret')
+    error_text = '{\n                ""error"": {\n                    ""message"": ""Rate limit reached for 10KTPM-200RPM in organization org-OASFC7k1Ff5IzueeLArhQtnT on tokens per min. Limit: 10000 / min. Please try again in 6ms. Contact us through our help center at help.openai.com if you continue to have issues."",\n                    ""type"": ""tokens"",\n                    ""param"": null,\n                    ""code"": ""rate_limit_exceeded""\n                }\n            }'
+    content = 'DONE'
+    success_text = (('{""id"": ""gen-123"", ""choices"": [{""index"": 0, ""delta"": {""role"": ""assistant"", ""content"": ""' + content) + '""}}]}')
+    error_response = Mock()
+    error_response.status_code = 429
+    error_response.text = error_text
+    mock_response = Mock()
+    mock_response.status_code = 200
+    mock_response.iter_lines.return_value = [success_text.encode('utf-8')]
+    mock_post.side_effect = [error_response, error_response, error_response, error_response, error_response, error_response, error_response, error_response, error_response, error_response, error_response, error_response, mock_response]
+    wrapper = retry_on_exception(stream_gpt_completion)
+    data = {'model': 'gpt-4'}
+    response = wrapper(data, 'test', project)
+    assert (response == {'text': 'DONE'})
+    assert (mock_sleep.call_args_list == [call(0.006), call(0.012), call(0.024), call(0.048), call(0.096), call(0.192), call(0.384), call(0.768), call(1.536), call(3.072), call(6.144), call(6.144)])
+",553
+"
+
+@pytest.mark.uses_tokens
+@pytest.mark.parametrize('endpoint, model', [('OPENAI', 'gpt-4'), ('OPENROUTER', 'openai/gpt-3.5-turbo'), ('OPENROUTER', 'meta-llama/codellama-34b-instruct'), ('OPENROUTER', 'google/palm-2-chat-bison'), ('OPENROUTER', 'google/palm-2-codechat-bison'), ('OPENROUTER', 'anthropic/claude-2')])
+def test_chat_completion_Architect(self, endpoint, model, monkeypatch):
+    monkeypatch.setenv('ENDPOINT', endpoint)
+    monkeypatch.setenv('MODEL_NAME', model)
+    agent = Architect(project)
+    convo = AgentConvo(agent)
+    convo.construct_and_add_message_from_prompt('architecture/technologies.prompt', {'name': 'Test App', 'prompt': '\nThe project involves the development of a web-based chat application named ""Test_App"". \nIn this application, users can send direct messages to each other. \nHowever, it does not include a group chat functionality. \nMultimedia messaging, such as the exchange of images and videos, is not a requirement for this application. \nNo clear instructions were given for the inclusion of user profile customization features like profile \npicture and status updates, as well as a feature for chat history. The project must be developed strictly \nas a monolithic application, regardless of any other suggested methods. \nThe project\'s specifications are subject to the project manager\'s discretion, implying a need for \nsolution-oriented decision-making in areas where precise instructions were not provided.', 'app_type': 'web app', 'user_stories': ['User will be able to send direct messages to another user.', 'User will receive direct messages from other users.', 'User will view the sent and received messages in a conversation view.', 'User will select a user to send a direct message.', 'User will be able to search for users to send direct messages to.', 'Users can view the online status of other users.', 'User will be able to log into the application using their credentials.', 'User will be able to logout from the Test_App.', 'User will be able to register a new account on Test_App.']})
+    function_calls = ARCHITECTURE
+    response = create_gpt_chat_completion(convo.messages, '', project, function_calls=function_calls)
+    assert convo.messages[0]['content'].startswith('You are an experienced software architect')
+    assert convo.messages[1]['content'].startswith('You are working in a software development agency')
+    assert (response is not None)
+    response = parse_agent_response(response, function_calls)
+    assert ('Node.js' in response)
+",690
+"
+
+@pytest.mark.uses_tokens
+@pytest.mark.parametrize('endpoint, model', [('OPENAI', 'gpt-4'), ('OPENROUTER', 'openai/gpt-3.5-turbo'), ('OPENROUTER', 'meta-llama/codellama-34b-instruct'), ('OPENROUTER', 'phind/phind-codellama-34b-v2'), ('OPENROUTER', 'google/palm-2-chat-bison'), ('OPENROUTER', 'google/palm-2-codechat-bison'), ('OPENROUTER', 'anthropic/claude-2'), ('OPENROUTER', 'mistralai/mistral-7b-instruct')])
+def test_chat_completion_TechLead(self, endpoint, model, monkeypatch):
+    monkeypatch.setenv('ENDPOINT', endpoint)
+    monkeypatch.setenv('MODEL_NAME', model)
+    agent = TechLead(project)
+    convo = AgentConvo(agent)
+    convo.construct_and_add_message_from_prompt('development/plan.prompt', {'name': 'Test App', 'app_summary': '\n    The project entails creating a web-based chat application, tentatively named ""chat_app."" \nThis application does not require user authentication or chat history storage. \nIt solely supports one-on-one messaging, excluding group chats or multimedia sharing like photos, videos, or files. \nAdditionally, there are no specific requirements for real-time functionality, like live typing indicators or read receipts. \nThe development of this application will strictly follow a monolithic structure, avoiding the use of microservices, as per the client\'s demand. \nThe development process will include the creation of user stories and tasks, based on detailed discussions with the client.', 'app_type': 'web app', 'user_stories': ['User Story 1: As a user, I can access the web-based ""chat_app"" directly without needing to authenticate or log in. Do you want to add anything else? If not, just press ENTER.', 'User Story 2: As a user, I can start one-on-one conversations with another user on the ""chat_app"". Do you want to add anything else? If not, just press ENTER.', 'User Story 3: As a user, I can send and receive messages in real-time within my one-on-one conversation on the ""chat_app"". Do you want to add anything else? If not, just press ENTER.', 'User Story 4: As a user, I do not need to worry about deleting or storing my chats because the ""chat_app"" does not store chat histories. Do you want to add anything else? If not, just press ENTER.', 'User Story 5: As a user, I will only be able to send text messages, as the ""chat_app"" does not support any kind of multimedia sharing like photos, videos, or files. Do you want to add anything else? If not, just press ENTER.', 'User Story 6: As a user, I will not see any live typing indicators or read receipts since the ""chat_app"" does not provide any additional real-time functionality beyond message exchange. Do you want to add anything else? If not, just press ENTER.']})
+    function_calls = DEVELOPMENT_PLAN
+    response = create_gpt_chat_completion(convo.messages, '', project, function_calls=function_calls)
+    assert convo.messages[0]['content'].startswith('You are a tech lead in a software development agency')
+    assert convo.messages[1]['content'].startswith('You are working in a software development agency and a project manager and software architect approach you')
+    assert (response is not None)
+    response = parse_agent_response(response, function_calls)
+    assert_non_empty_string(response[0]['description'])
+    assert_non_empty_string(response[0]['programmatic_goal'])
+    assert_non_empty_string(response[0]['user_review_goal'])
+",962
+"def send_message(self, prompt_path=None, prompt_data=None, function_calls: FunctionCallSet=None):
+    '\n        Sends a message in the conversation.\n\n        Args:\n            prompt_path: The path to a prompt.\n            prompt_data: Data associated with the prompt.\n            function_calls: Optional function calls to be included in the message.\n\n        Returns:\n            The response from the agent.\n        '
+    self.construct_and_add_message_from_prompt(prompt_path, prompt_data)
+    if (self.agent.__class__.__name__ == 'Developer'):
+        self.agent.project.llm_req_num += 1
+    development_step = get_saved_development_step(self.agent.project)
+    if ((development_step is not None) and self.agent.project.skip_steps):
+        print(yellow(f'Restoring development step with id {development_step.id}'))
+        self.agent.project.checkpoints['last_development_step'] = development_step
+        self.agent.project.restore_files(development_step.id)
+        response = development_step.llm_response
+        self.messages = development_step.messages
+        if (self.agent.project.skip_until_dev_step and (str(development_step.id) == self.agent.project.skip_until_dev_step)):
+            self.agent.project.skip_steps = False
+            delete_all_subsequent_steps(self.agent.project)
+            if (('delete_unrelated_steps' in self.agent.project.args) and self.agent.project.args['delete_unrelated_steps']):
+                self.agent.project.delete_all_steps_except_current_branch()
+        if development_step.token_limit_exception_raised:
+            raise TokenLimitError(development_step.token_limit_exception_raised)
+    else:
+        try:
+            response = create_gpt_chat_completion(self.messages, self.high_level_step, self.agent.project, function_calls=function_calls)
+        except TokenLimitError as e:
+            save_development_step(self.agent.project, prompt_path, prompt_data, self.messages, '', str(e))
+            raise e
+        if (self.agent.__class__.__name__ == 'Developer'):
+            development_step = save_development_step(self.agent.project, prompt_path, prompt_data, self.messages, response)
+    if (response == {}):
+        logger.error('Aborting with ""OpenAI API error happened""')
+        raise Exception('OpenAI API error happened.')
+    response = parse_agent_response(response, function_calls)
+    message_content = (response[0] if (type(response) == tuple) else response)
+    if isinstance(message_content, list):
+        if ('to_message' in function_calls):
+            string_response = function_calls['to_message'](message_content)
+        elif ((len(message_content) > 0) and isinstance(message_content[0], dict)):
+            string_response = [(f'''#{i}
+''' + array_of_objects_to_string(d)) for (i, d) in enumerate(message_content)]
+        else:
+            string_response = [('- ' + r) for r in message_content]
+        message_content = '\n'.join(string_response)
+    logger.info('\n>>>>>>>>>> Assistant Prompt >>>>>>>>>>\n%s\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>', message_content)
+    self.messages.append({'role': 'assistant', 'content': message_content})
+    self.log_message(message_content)
+    return response",916
+"def execute_command(project, command, timeout=None, success_message=None, process_name: str=None, force=False) -> (str, str, int):
+    ""\n    Execute a command and capture its output.\n\n    Args:\n        project: The project associated with the command.\n        command (str): The command to run.\n        timeout (int, optional): The maximum execution time in milliseconds. Default is None.\n        success_message: A message to look for in the output of the command to determine if successful or not.\n        process_name (str, optional): A name for the process.\n                            If `timeout` is not provided, can be used to terminate the process.\n        force (bool, optional): Whether to execute the command without confirmation. Default is False.\n\n    Returns:\n        cli_response (str): The command output\n                            or: '', 'DONE' if user answered 'no' or 'skip'\n        llm_response (str): 'DONE' if 'no', 'skip' or `success_message` matched.\n                            Otherwise `None` - caller should send `cli_response` to LLM\n        exit_code (int): The exit code of the process.\n    ""
+    if (timeout is not None):
+        if (timeout < 0):
+            timeout = None
+        else:
+            if (timeout < 1000):
+                timeout *= 1000
+            timeout = min(max(timeout, MIN_COMMAND_RUN_TIME), MAX_COMMAND_RUN_TIME)
+    if (not force):
+        print(yellow_bold('\n--------- EXECUTE COMMAND ----------'))
+        question = f'Can I execute the command: `{yellow_bold(command)}`'
+        if (timeout is not None):
+            question += f' with {timeout}ms timeout?'
+        else:
+            question += '?'
+        answer = ask_user(project, question, False, hint='If yes, just press ENTER')
+        print(('answer: ' + answer))
+        if (answer == 'no'):
+            return ('', 'DONE', None)
+        elif (answer == 'skip'):
+            return ('', 'DONE', None)
+    if (('cd ' in command) or ('source ' in command)):
+        command = ((""bash -c '"" + command) + ""'"")
+    project.command_runs_count += 1
+    command_run = get_saved_command_run(project, command)
+    if ((command_run is not None) and project.skip_steps):
+        project.checkpoints['last_command_run'] = command_run
+        print(yellow(f'''Restoring command run response id {command_run.id}:
+```
+{command_run.cli_response}```'''))
+        return (command_run.cli_response, None, None)
+    return_value = None
+    was_success = None
+    q_stderr = queue.Queue()
+    q = queue.Queue()
+    process = run_command(command, project.root_path, q, q_stderr)
+    if (process_name is not None):
+        terminate_named_process(process_name)
+        running_processes[process_name] = (command, process.pid)
+    output = ''
+    stderr_output = ''
+    start_time = time.time()
+    try:
+        while True:
+            elapsed_time = (time.time() - start_time)
+            if (process.poll() is not None):
+                time.sleep(0.1)
+    except :
+        elapsed_time = 0",816
+"def execute_command3(self, command, timeout=None, success_message=None, process_name: str=None, force=False) -> (str, str, int):
+            if ((timeout is not None) and ((elapsed_time * 1000) > timeout)):
+                if (process_name is not None):
+                    logger.info(f'Process ""{process_name}"" running after timeout as pid: {process.pid}')
+                    break
+                raise TimeoutError('Command exceeded the specified timeout.')
+            try:
+                line = q.get_nowait()
+            except queue.Empty:
+                line = None
+            if line:
+                output += line
+                print((green('CLI OUTPUT:') + line), end='')
+                logger.info(('CLI OUTPUT: ' + line))
+                if ((success_message is not None) and (success_message in line)):
+                    logger.info('Success message found: %s', success_message)
+                    was_success = True
+                    break
+            try:
+                stderr_line = q_stderr.get_nowait()
+            except queue.Empty:
+                stderr_line = None
+            if stderr_line:
+                stderr_output += stderr_line
+                print((red('CLI ERROR:') + stderr_line), end='')
+                logger.error(('CLI ERROR: ' + stderr_line))
+                if isinstance(e, KeyboardInterrupt):
+                    print('\nCTRL+C detected. Stopping command execution...')
+                    logger.info('CTRL+C detected. Stopping command execution...')
+                else:
+                    print('\nTimeout detected. Stopping command execution...')
+                    logger.warn('Timeout detected. Stopping command execution...')
+                was_success = False
+                terminate_process(process.pid)
+            elapsed_time = (time.time() - start_time)
+            logger.info(f'`{command}` took {round((elapsed_time * 1000))}ms to execute.')
+            if (return_value is None):
+                return_value = ''
+                if (stderr_output != ''):
+                    return_value = (('stderr:\n```\n' + stderr_output[0:MAX_COMMAND_OUTPUT_LENGTH]) + '\n```\n')
+                return_value += (('stdout:\n```\n' + output[(- MAX_COMMAND_OUTPUT_LENGTH):]) + '\n```')
+            save_command_run(project, command, return_value)
+            return (return_value, ('DONE' if was_success else None), process.returncode)",571
+"def run_command_until_success(convo, command, timeout: Union[(int, None)], process_name: Union[(str, None)]=None, success_message=None, additional_message=None, force=False, return_cli_response=False, is_root_task=False):
+    '\n    Run a command until it succeeds or reaches a timeout.\n\n    Args:\n        convo (AgentConvo): The conversation object.\n        command (str): The command to run.\n        timeout (int): The maximum execution time in milliseconds.\n        process_name: A name for the process.\n                      If `timeout` is not provided, can be used to terminate the process.\n        success_message: A message to look for in the output of the command to determine if successful or not.\n        additional_message (str, optional): Additional message to include in the response.\n        force (bool, optional): Whether to execute the command without confirmation. Default is False.\n        return_cli_response (bool, optional): If True, may raise TooDeepRecursionError(cli_response)\n        is_root_task (bool, optional): If True and TokenLimitError is raised, will call `convo.load_branch(reset_branch_id)`\n    '
+    (cli_response, response, exit_code) = execute_command(convo.agent.project, command, timeout=timeout, success_message=success_message, process_name=process_name, force=force)
+    if (response is None):
+        logger.info(f'`{command}` exit code: {exit_code}')
+        if (exit_code is None):
+            response = 'DONE'
+        else:
+            response = convo.send_message('dev_ops/ran_command.prompt', {'cli_response': cli_response, 'command': command, 'additional_message': additional_message, 'exit_code': exit_code})
+            logger.debug(f'LLM response: {response}')
+    if (response != 'DONE'):
+        print(red('Got incorrect CLI response:'))
+        print(cli_response)
+        print(red('-------------------'))
+        reset_branch_id = convo.save_branch()",524
+"def __init__(self, args, name=None, description=None, user_stories=None, user_tasks=None, architecture=None, development_plan=None, current_step=None, ipc_client_instance=None, enable_dot_pilot_gpt=True):
+    '\n        Initialize a project.\n\n        Args:\n            args (dict): Project arguments - app_id, (app_type, name), user_id, email, password, step\n            name (str, optional): Project name. Default is None.\n            description (str, optional): Project description. Default is None.\n            user_stories (list, optional): List of user stories. Default is None.\n            user_tasks (list, optional): List of user tasks. Default is None.\n            architecture (str, optional): Project architecture. Default is None.\n            development_plan (str, optional): Development plan. Default is None.\n            current_step (str, optional): Current step in the project. Default is None.\n        '
+    self.args = args
+    self.llm_req_num = 0
+    self.command_runs_count = 0
+    self.user_inputs_count = 0
+    self.checkpoints = {'last_user_input': None, 'last_command_run': None, 'last_development_step': None}
+    self.root_path = ''
+    self.skip_until_dev_step = None
+    self.skip_steps = None
+    self.ipc_client_instance = ipc_client_instance
+    if (current_step is not None):
+        self.current_step = current_step
+    if (name is not None):
+        self.name = name
+    if (description is not None):
+        self.description = description
+    if (user_stories is not None):
+        self.user_stories = user_stories
+    if (user_tasks is not None):
+        self.user_tasks = user_tasks
+    if (architecture is not None):
+        self.architecture = architecture
+    self.dot_pilot_gpt = DotGptPilot(log_chat_completions=enable_dot_pilot_gpt)",522
+"def get_full_file_path(self, file_path: str, file_name: str) -> Tuple[(str, str)]:
+    are_windows_paths = (('\\' in file_path) or ('\\' in file_name) or ('\\' in self.root_path))
+    if are_windows_paths:
+        file_name = file_name.replace('\\', '/')
+        file_path = file_path.replace('\\', '/')
+    file_path = file_path.replace('~', '')
+    file_name = file_name.replace('~', '')
+    file_path = file_path.replace(self.root_path, '')
+    file_name = file_name.replace(self.root_path, '')
+    if (('.' not in file_path) and (not file_path.endswith('/'))):
+        file_path += '/'
+    if (('.' not in file_name) and (not file_name.endswith('/'))):
+        file_name += '/'
+    if (('/' in file_path) and (not file_path.startswith('/'))):
+        file_path = ('/' + file_path)
+    if (('/' in file_name) and (not file_name.startswith('/'))):
+        file_name = ('/' + file_name)
+    (head_path, tail_path) = os.path.split(file_path)
+    (head_name, tail_name) = os.path.split(file_name)
+    final_file_path = (head_path if (head_path != '') else head_name)
+    final_file_name = (tail_name if (tail_name != '') else tail_path)
+    if (head_path in head_name):
+        final_file_path = head_name
+    elif (final_file_path != head_name):
+        if ((head_name not in head_path) and (head_path not in head_name)):
+            if ('.' in file_path):
+                final_file_path = (head_name + head_path)
+            else:
+                final_file_path = (head_path + head_name)
+    if (final_file_path == ''):
+        final_file_path = '/'
+    final_absolute_path = (((self.root_path + final_file_path) + '/') + final_file_name)
+    if ('//' in final_absolute_path):
+        final_absolute_path = final_absolute_path.replace('//', '/')
+    if ('//' in final_file_path):
+        final_file_path = final_file_path.replace('//', '/')
+    if are_windows_paths:
+        final_file_path = final_file_path.replace('/', '\\')
+        final_absolute_path = final_absolute_path.replace('/', '\\')
+    return (final_file_path, final_absolute_path)",710
+"def test_debug(mock_save_command, mock_run_command, mock_get_saved_command, mock_save_input, mock_user_input, mock_save_step, mock_get_saved_step):
+    (builtins.print, ipc_client_instance) = get_custom_print({})
+    project = create_project()
+    project.current_step = 'coding'
+    developer = Developer(project)
+    project.developer = developer
+    convo = AgentConvo(developer)
+    convo.load_branch = (lambda x: None)
+    debugger = Debugger(developer)
+    convo.construct_and_add_message_from_prompt('dev_ops/ran_command.prompt', {'cli_response': ""\nstderr:\n```\nnode:internal/modules/cjs/loader:1080\n  throw err;\n  ^\n\nError: Cannot find module 'mime'\nRequire stack:\n- /workspace/chat_app/node_modules/send/index.js\n- /workspace/chat_app/node_modules/express/lib/utils.js\n- /workspace/chat_app/node_modules/express/lib/application.js\n- /workspace/chat_app/node_modules/express/lib/express.js\n- /workspace/chat_app/node_modules/express/index.js\n- /workspace/chat_app/server.js\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1077:15)\n    at Module._load (node:internal/modules/cjs/loader:922:27)\n    at Module.require (node:internal/modules/cjs/loader:1143:19)\n    at require (node:internal/modules/cjs/helpers:121:18)\n    at Object.<anonymous> (/workspace/chat_app/node_modules/send/index.js:24:12)\n    at Module._compile (node:internal/modules/cjs/loader:1256:14)\n    at Module._extensions..js (node:internal/modules/cjs/loader:1310:10)\n    at Module.load (node:internal/modules/cjs/loader:1119:32)\n    at Module._load (node:internal/modules/cjs/loader:960:12)\n```\nstdout:\n```\n> chat_app@1.0.0 start\n> node server.js\n```        \n""})
+    mock_questionary = MockQuestionary(['', ''])
+    with patch('utils.questionary.questionary', mock_questionary):
+        result = debugger.debug(convo, command={'command': 'npm run start'}, is_root_task=True)
+        assert (result == {'success': True})",672
+"def continue_development2(self, iteration_convo: IterationConvo, last_branch_name: str, continue_description: str) -> None:
+    while True:
+        logger.info('Continue development: %s', last_branch_name)
+        iteration_convo.load_branch(last_branch_name)
+        user_description = ((('Here is a description of what should be working: \n\n' + blue_bold(continue_description)) + '\n') if (continue_description != '') else '')
+        user_description = ('Can you check if the app works please? ' + user_description)
+        if ((self.project.ipc_client_instance is None) or (self.project.ipc_client_instance.client is None)):
+            user_description += yellow_bold((('\n\nIf you want to run the app, just type ""r"" and press ENTER and that will run `' + self.run_command) + '`'))
+        else:
+            print(self.run_command, type='run_command')
+        response = self.project.ask_for_human_intervention(user_description, cbs={'r': (lambda convo: run_command_until_success(convo, self.run_command, process_name='app', timeout=None, force=True, return_cli_response=True, is_root_task=True))}, convo=iteration_convo, is_root_task=True)
+        logger.info('response: %s', response)
+        user_feedback = (response['user_input'] if ('user_input' in response) else None)
+        if (user_feedback == 'continue'):
+            return {'success': True, 'user_input': user_feedback}
+        if (user_feedback is not None):
+            iteration_convo = AgentConvo(self)
+            iteration_convo.send_message('development/iteration.prompt', {'name': self.project.args['name'], 'app_type': self.project.args['app_type'], 'app_summary': self.project.project_description, 'clarification': [], 'user_stories': self.project.user_stories, 'technologies': self.project.architecture, 'array_of_objects_to_string': array_of_objects_to_string, 'directory_tree': self.project.get_directory_tree(True), 'files': self.project.get_all_coded_files(), 'user_input': user_feedback})
+            task_steps = iteration_convo.send_message('development/parse_task.prompt', {'running_processes': running_processes}, IMPLEMENT_TASK)
+            iteration_convo.remove_last_x_messages(2)
+            return self.execute_task(iteration_convo, task_steps, is_root_task=True)",633
+"def get_project_description(self):
+    self.project.app = get_app(self.project.args['app_id'], error_if_not_found=False)
+    if (self.project.app is not None):
+        step = get_progress_steps(self.project.args['app_id'], PROJECT_DESCRIPTION_STEP)
+        if (step and (not should_execute_step(self.project.args['step'], PROJECT_DESCRIPTION_STEP))):
+            step_already_finished(self.project.args, step)
+            self.project.set_root_path(setup_workspace(self.project.args))
+            self.project.project_description = step['summary']
+            self.project.project_description_messages = step['messages']
+            return
+    self.project.current_step = PROJECT_DESCRIPTION_STEP
+    if ('app_type' not in self.project.args):
+        self.project.args['app_type'] = ask_for_app_type()
+    if ('name' not in self.project.args):
+        self.project.args['name'] = clean_filename(ask_user(self.project, 'What is the project name?'))
+    self.project.set_root_path(setup_workspace(self.project.args))
+    self.project.app = save_app(self.project)
+    main_prompt = ask_for_main_app_definition(self.project)
+    print(json.dumps({'open_project': {'path': self.project.root_path, 'name': self.project.args['name']}}), type='info')
+    high_level_messages = get_additional_info_from_openai(self.project, generate_messages_from_description(main_prompt, self.project.args['app_type'], self.project.args['name']))
+    print(green_bold('Project Summary:\n'))
+    convo_project_description = AgentConvo(self)
+    high_level_summary = convo_project_description.send_message('utils/summary.prompt', {'conversation': '\n'.join([f""{msg['role']}: {msg['content']}"" for msg in high_level_messages])})
+    save_progress(self.project.args['app_id'], self.project.current_step, {'prompt': main_prompt, 'messages': high_level_messages, 'summary': high_level_summary, 'app_data': generate_app_data(self.project.args)})
+    self.project.project_description = high_level_summary
+    self.project.project_description_messages = high_level_messages
+    return",625
+"def setup_method(self):
+    (builtins.print, ipc_client_instance) = get_custom_print({})
+    name = 'TestTechLead'
+    self.project = Project({'app_id': 'test-tech-lead', 'name': name, 'app_type': ''}, name=name, architecture=[], user_stories=[])
+    self.project.set_root_path(os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../../workspace/TestTechLead')))
+    self.project.technologies = []
+    self.project.project_description = '\nThe project entails creating a web-based chat application, tentatively named ""chat_app."" \nThis application does not require user authentication or chat history storage. \nIt solely supports one-on-one messaging, excluding group chats or multimedia sharing like photos, videos, or files. \nAdditionally, there are no specific requirements for real-time functionality, like live typing indicators or read receipts. \nThe development of this application will strictly follow a monolithic structure, avoiding the use of microservices, as per the client\'s demand. \nThe development process will include the creation of user stories and tasks, based on detailed discussions with the client. \n        '
+    self.project.user_stories = ['User Story 1: As a user, I can access the web-based ""chat_app"" directly without needing to authenticate or log in. Do you want to add anything else? If not, just press ENTER.', 'User Story 2: As a user, I can start one-on-one conversations with another user on the ""chat_app"". Do you want to add anything else? If not, just press ENTER.', 'User Story 3: As a user, I can send and receive messages in real-time within my one-on-one conversation on the ""chat_app"". Do you want to add anything else? If not, just press ENTER.', 'User Story 4: As a user, I do not need to worry about deleting or storing my chats because the ""chat_app"" does not store chat histories. Do you want to add anything else? If not, just press ENTER.', 'User Story 5: As a user, I will only be able to send text messages, as the ""chat_app"" does not support any kind of multimedia sharing like photos, videos, or files. Do you want to add anything else? If not, just press ENTER.', 'User Story 6: As a user, I will not see any live typing indicators or read receipts since the ""chat_app"" does not provide any additional real-time functionality beyond message exchange. Do you want to add anything else? If not, just press ENTER.']
+    self.project.architecture = ['Node.js', 'Socket.io', 'Bootstrap', 'JavaScript', 'HTML5', 'CSS3']
+    self.project.current_step = DEVELOPMENT_PLANNING_STEP",702
+"def retry_on_exception(func):
+        while True:
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                err_str = str(e)
+                if isinstance(e, json.JSONDecodeError):
+                    if (e.msg.startswith('Expecting') or (e.msg == 'Unterminated string starting at')):
+                        if ((e.msg == 'Expecting value') and (len(e.doc) > e.pos)):
+                            err_str = re.split('[},\\\\n]', e.doc[e.pos:])[0]
+                            err_str = f'Invalid value: `{err_str}`'
+                        else:
+                            logger.info('Received incomplete JSON response from LLM. Asking for the rest...')
+                            args[0]['function_buffer'] = e.doc
+                            if ('function_error' in args[0]):
+                                del args[0]['function_error']
+                            continue
+                    function_error_count = update_error_count(args)
+                    logger.warning('Received invalid character in JSON response from LLM. Asking to retry...')
+                    logger.info(f'  received: {e.doc}')
+                    set_function_error(args, err_str)
+                    if (function_error_count < 3):
+                        continue
+                elif isinstance(e, ValidationError):
+                    function_error_count = update_error_count(args)
+                    logger.warning('Received invalid JSON response from LLM. Asking to retry...')
+                    set_function_error(args, f'at {e.json_path} - {e.message}')
+                    if (function_error_count < 3):
+                        continue
+                if ('context_length_exceeded' in err_str):
+                    raise TokenLimitError(get_tokens_in_messages_from_openai_error(err_str), MAX_GPT_MODEL_TOKENS)
+                if ('rate_limit_exceeded' in err_str):
+                    match = re.search('Please try again in (\\d+)ms.', err_str)
+                    if match:
+                        if (wait_duration_ms is None):
+                            wait_duration_ms = int(match.group(1))
+                        elif (wait_duration_ms < 6000):
+                            wait_duration_ms *= 2
+                        logger.debug(f'Rate limited. Waiting {wait_duration_ms}ms...')
+                        time.sleep((wait_duration_ms / 1000))
+                    continue
+                print(red('There was a problem with request to openai API:'))
+                print(err_str)
+                logger.error(f'There was a problem with request to openai API: {err_str}')
+                project = args[2]
+                user_message = styled_text(project, ""Do you want to try make the same request again? If yes, just press ENTER. Otherwise, type 'no'."", style=Style.from_dict({'question': '#FF0000 bold', 'answer': '#FF910A bold'}))
+                if (user_message != ''):
+                    return {}",716
+"def stream_gpt_completion(data, req_type, project):
+    ""\n    Called from create_gpt_chat_completion()\n    :param data:\n    :param req_type: 'project_description' etc. See common.STEPS\n    :param project: NEEDED FOR WRAPPER FUNCTION retry_on_exception\n    :return: {'text': str} or {'function_calls': {'name': str, arguments: '{...}'}}\n    ""
+    try:
+        terminal_width = os.get_terminal_size().columns
+    except OSError:
+        terminal_width = 50
+    lines_printed = 2
+    gpt_response = ''
+    buffer = ''
+    expecting_json = None
+    received_json = False
+    if ('functions' in data):
+        expecting_json = data['functions']
+        if ('function_buffer' in data):
+            incomplete_json = get_prompt('utils/incomplete_json.prompt', {'received_json': data['function_buffer']})
+            data['messages'].append({'role': 'user', 'content': incomplete_json})
+            gpt_response = data['function_buffer']
+            received_json = True
+        elif ('function_error' in data):
+            invalid_json = get_prompt('utils/invalid_json.prompt', {'invalid_reason': data['function_error']})
+            data['messages'].append({'role': 'user', 'content': invalid_json})
+            received_json = True
+        data = {key: value for (key, value) in data.items() if (not key.startswith('function'))}
+
+    def return_result(result_data, lines_printed):
+        if buffer:
+            lines_printed += count_lines_based_on_width(buffer, terminal_width)
+        logger.debug(f'lines printed: {lines_printed} - {terminal_width}')
+        delete_last_n_lines(lines_printed)
+        return result_data
+    model = os.getenv('MODEL_NAME', 'gpt-4')
+    endpoint = os.getenv('ENDPOINT')
+    logger.info(f'> Request model: {model}')
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug('\n'.join([f""{message['role']}: {message['content']}"" for message in data['messages']]))
+    if (endpoint == 'AZURE'):
+        endpoint_url = (((os.getenv('AZURE_ENDPOINT') + '/openai/deployments/') + model) + '/chat/completions?api-version=2023-05-15')
+        headers = {'Content-Type': 'application/json', 'api-key': get_api_key_or_throw('AZURE_API_KEY')}
+    elif (endpoint == 'OPENROUTER'):
+        endpoint_url = os.getenv('OPENROUTER_ENDPOINT', 'https://openrouter.ai/api/v1/chat/completions')
+        headers = {'Content-Type': 'application/json', 'Authorization': ('Bearer ' + get_api_key_or_throw('OPENROUTER_API_KEY')), 'HTTP-Referer': 'https://github.com/Pythagora-io/gpt-pilot', 'X-Title': 'GPT Pilot'}
+        data['max_tokens'] = MAX_GPT_MODEL_TOKENS
+        data['model'] = model
+    else:
+        endpoint_url = os.getenv('OPENAI_ENDPOINT', 'https://api.openai.com/v1/chat/completions')
+        headers = {'Content-Type': 'application/json', 'Authorization': ('Bearer ' + get_api_key_or_throw('OPENAI_API_KEY'))}
+        data['model'] = model
+    response = requests.post(endpoint_url, headers=headers, json=data, stream=True)
+    if (response.status_code != 200):
+        project.dot_pilot_gpt.log_chat_completion(endpoint, model, req_type, data['messages'], response.text)
+        logger.info(f'problem with request (status {response.status_code}): {response.text}')
+        raise Exception(f'API responded with status code: {response.status_code}. Response text: {response.text}')",1029
+"def wrapper_on_exception(func, args, kwargs):
+    while True:
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            err_str = str(e)
+            if isinstance(e, json.JSONDecodeError):
+                if (e.msg.startswith('Expecting') or (e.msg == 'Unterminated string starting at')):
+                    if ((e.msg == 'Expecting value') and (len(e.doc) > e.pos)):
+                        err_str = re.split('[},\\\\n]', e.doc[e.pos:])[0]
+                        err_str = f'Invalid value: `{err_str}`'
+                    else:
+                        logger.info('Received incomplete JSON response from LLM. Asking for the rest...')
+                        args[0]['function_buffer'] = e.doc
+                        if ('function_error' in args[0]):
+                            del args[0]['function_error']
+                        continue
+                function_error_count = update_error_count(args)
+                logger.warning('Received invalid character in JSON response from LLM. Asking to retry...')
+                logger.info(f'  received: {e.doc}')
+                set_function_error(args, err_str)
+                if (function_error_count < 3):
+                    continue
+            elif isinstance(e, ValidationError):
+                function_error_count = update_error_count(args)
+                logger.warning('Received invalid JSON response from LLM. Asking to retry...')
+                set_function_error(args, f'at {e.json_path} - {e.message}')
+                if (function_error_count < 3):
+                    continue
+            if ('context_length_exceeded' in err_str):
+                raise TokenLimitError(get_tokens_in_messages_from_openai_error(err_str), MAX_GPT_MODEL_TOKENS)
+            if ('rate_limit_exceeded' in err_str):
+                match = re.search('Please try again in (\\d+)ms.', err_str)
+                if match:
+                    if (wait_duration_ms is None):
+                        wait_duration_ms = int(match.group(1))
+                    elif (wait_duration_ms < 6000):
+                        wait_duration_ms *= 2
+                    logger.debug(f'Rate limited. Waiting {wait_duration_ms}ms...')
+                    time.sleep((wait_duration_ms / 1000))
+                continue
+            print(red('There was a problem with request to openai API:'))
+            print(err_str)
+            logger.error(f'There was a problem with request to openai API: {err_str}')
+            project = args[2]
+            user_message = styled_text(project, ""Do you want to try make the same request again? If yes, just press ENTER. Otherwise, type 'no'."", style=Style.from_dict({'question': '#FF0000 bold', 'answer': '#FF910A bold'}))
+            if (user_message != ''):
+                return {}",712
+"def test_DEVELOPMENT_PLAN(self):
+    assert assert_json_schema('\n{\n  ""plan"": [\n    {\n      ""description"": ""Set up project structure including creation of necessary directories and files. Initialize Node.js and install necessary libraries such as express and socket.io."",\n      ""programmatic_goal"": ""Project structure should be set up and Node.js initialized. Express and socket.io libraries should be installed and reflected in the package.json file."",\n      ""user_review_goal"": ""Developer should be able to start an empty express server by running `npm start` command without any errors.""\n    },\n    {\n      ""description"": ""Create a simple front-end HTML page with CSS and JavaScript that includes input for typing messages and area for displaying messages."",\n      ""programmatic_goal"": ""There should be an HTML file containing an input box for typing messages and an area for displaying the messages. This HTML page should be served when user navigates to the root URL."",\n      ""user_review_goal"": ""Navigating to the root URL (http://localhost:3000) should display the chat front-end with an input box and a message area.""\n    },\n    {\n      ""description"": ""Set up socket.io on the back-end to handle websocket connections and broadcasting messages to the clients."",\n      ""programmatic_goal"": ""Server should be able to handle websocket connections using socket.io and broadcast messages to all connected clients."",\n      ""user_review_goal"": ""By using two different browsers or browser tabs, when one user sends a message from one tab, it should appear in the other user\'s browser tab in real-time.""\n    },\n    {\n      ""description"": ""Integrate front-end with socket.io client to send messages from the input field to the server and display incoming messages in the message area."",\n      ""programmatic_goal"": ""Front-end should be able to send messages to server and display incoming messages in the message area using socket.io client."",\n      ""user_review_goal"": ""Typing a message in the chat input and sending it should then display the message in the chat area.""\n    }\n  ]\n}\n'.strip(), DEVELOPMENT_PLAN['definitions'])",525
+"def test_rate_limit_error(self, mock_sleep, mock_post, monkeypatch):
+    monkeypatch.setenv('OPENAI_API_KEY', 'secret')
+    error_text = '{\n                ""error"": {\n                    ""message"": ""Rate limit reached for 10KTPM-200RPM in organization org-OASFC7k1Ff5IzueeLArhQtnT on tokens per min. Limit: 10000 / min. Please try again in 6ms. Contact us through our help center at help.openai.com if you continue to have issues."",\n                    ""type"": ""tokens"",\n                    ""param"": null,\n                    ""code"": ""rate_limit_exceeded""\n                }\n            }'
+    content = 'DONE'
+    success_text = (('{""id"": ""gen-123"", ""choices"": [{""index"": 0, ""delta"": {""role"": ""assistant"", ""content"": ""' + content) + '""}}]}')
+    error_response = Mock()
+    error_response.status_code = 429
+    error_response.text = error_text
+    mock_response = Mock()
+    mock_response.status_code = 200
+    mock_response.iter_lines.return_value = [success_text.encode('utf-8')]
+    mock_post.side_effect = [error_response, error_response, error_response, error_response, error_response, error_response, error_response, error_response, error_response, error_response, error_response, error_response, mock_response]
+    wrapper = retry_on_exception(stream_gpt_completion)
+    data = {'model': 'gpt-4'}
+    response = wrapper(data, 'test', project)
+    assert (response == {'text': 'DONE'})
+    assert (mock_sleep.call_args_list == [call(0.006), call(0.012), call(0.024), call(0.048), call(0.096), call(0.192), call(0.384), call(0.768), call(1.536), call(3.072), call(6.144), call(6.144)])",529
+"def test_chat_completion_Architect(self, endpoint, model, monkeypatch):
+    monkeypatch.setenv('ENDPOINT', endpoint)
+    monkeypatch.setenv('MODEL_NAME', model)
+    agent = Architect(project)
+    convo = AgentConvo(agent)
+    convo.construct_and_add_message_from_prompt('architecture/technologies.prompt', {'name': 'Test App', 'prompt': '\nThe project involves the development of a web-based chat application named ""Test_App"". \nIn this application, users can send direct messages to each other. \nHowever, it does not include a group chat functionality. \nMultimedia messaging, such as the exchange of images and videos, is not a requirement for this application. \nNo clear instructions were given for the inclusion of user profile customization features like profile \npicture and status updates, as well as a feature for chat history. The project must be developed strictly \nas a monolithic application, regardless of any other suggested methods. \nThe project\'s specifications are subject to the project manager\'s discretion, implying a need for \nsolution-oriented decision-making in areas where precise instructions were not provided.', 'app_type': 'web app', 'user_stories': ['User will be able to send direct messages to another user.', 'User will receive direct messages from other users.', 'User will view the sent and received messages in a conversation view.', 'User will select a user to send a direct message.', 'User will be able to search for users to send direct messages to.', 'Users can view the online status of other users.', 'User will be able to log into the application using their credentials.', 'User will be able to logout from the Test_App.', 'User will be able to register a new account on Test_App.']})
+    function_calls = ARCHITECTURE
+    response = create_gpt_chat_completion(convo.messages, '', project, function_calls=function_calls)
+    assert convo.messages[0]['content'].startswith('You are an experienced software architect')
+    assert convo.messages[1]['content'].startswith('You are working in a software development agency')
+    assert (response is not None)
+    response = parse_agent_response(response, function_calls)
+    assert ('Node.js' in response)",560
+"def test_chat_completion_TechLead(self, endpoint, model, monkeypatch):
+    monkeypatch.setenv('ENDPOINT', endpoint)
+    monkeypatch.setenv('MODEL_NAME', model)
+    agent = TechLead(project)
+    convo = AgentConvo(agent)
+    convo.construct_and_add_message_from_prompt('development/plan.prompt', {'name': 'Test App', 'app_summary': '\n    The project entails creating a web-based chat application, tentatively named ""chat_app."" \nThis application does not require user authentication or chat history storage. \nIt solely supports one-on-one messaging, excluding group chats or multimedia sharing like photos, videos, or files. \nAdditionally, there are no specific requirements for real-time functionality, like live typing indicators or read receipts. \nThe development of this application will strictly follow a monolithic structure, avoiding the use of microservices, as per the client\'s demand. \nThe development process will include the creation of user stories and tasks, based on detailed discussions with the client.', 'app_type': 'web app', 'user_stories': ['User Story 1: As a user, I can access the web-based ""chat_app"" directly without needing to authenticate or log in. Do you want to add anything else? If not, just press ENTER.', 'User Story 2: As a user, I can start one-on-one conversations with another user on the ""chat_app"". Do you want to add anything else? If not, just press ENTER.', 'User Story 3: As a user, I can send and receive messages in real-time within my one-on-one conversation on the ""chat_app"". Do you want to add anything else? If not, just press ENTER.', 'User Story 4: As a user, I do not need to worry about deleting or storing my chats because the ""chat_app"" does not store chat histories. Do you want to add anything else? If not, just press ENTER.', 'User Story 5: As a user, I will only be able to send text messages, as the ""chat_app"" does not support any kind of multimedia sharing like photos, videos, or files. Do you want to add anything else? If not, just press ENTER.', 'User Story 6: As a user, I will not see any live typing indicators or read receipts since the ""chat_app"" does not provide any additional real-time functionality beyond message exchange. Do you want to add anything else? If not, just press ENTER.']})
+    function_calls = DEVELOPMENT_PLAN
+    response = create_gpt_chat_completion(convo.messages, '', project, function_calls=function_calls)
+    assert convo.messages[0]['content'].startswith('You are a tech lead in a software development agency')
+    assert convo.messages[1]['content'].startswith('You are working in a software development agency and a project manager and software architect approach you')
+    assert (response is not None)
+    response = parse_agent_response(response, function_calls)
+    assert_non_empty_string(response[0]['description'])
+    assert_non_empty_string(response[0]['programmatic_goal'])
+    assert_non_empty_string(response[0]['user_review_goal'])",787
