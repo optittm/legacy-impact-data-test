@@ -1,5 +1,7 @@
 # legacy-impact-data-test
 
+This project's goal is to compare different methods of semantic search on GitHub repositories
+
 ## Installation
 
 Create a [virtual environnement](https://docs.python.org/3/library/venv.html) and add all the dependencies needed with :
@@ -59,4 +61,4 @@ Improvement to the semantic search, are to be added :
 - Improvement to the Algorithmic Method following the state of the art made.
 - Adding more semantic search methods like with Generative AI.
 
-Real comparison between all the semantic search methods used is to be added
+Real comparison between all the semantic search methods used is to be added.
