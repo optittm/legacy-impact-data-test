@@ -237,6 +237,15 @@ class GithubFactory(AbcFactoryGit):
         return self.__get_file_diff(shaBase, path_repos)
     
     def __get_file_diff(self, shaBase, path_repos):
+        """Gets the list of files that have changed between a base commit and the previous commit.
+        
+        Parameters:
+            shaBase (str): The commit SHA of the base commit to check out.
+            path_repos (str): The local path where the repository has been cloned.
+        
+        Returns:
+            list[str]: The list of file paths that have changed between the base commit and the previous commit."""
+        
         os.system(f"cd {path_repos} && git checkout {shaBase}")
         if self.previousSha == 0:
             self.previousSha = shaBase

@@ -28,6 +28,7 @@ class EmbeddingAlg(EmbeddingDbI):
         
         Returns:
             bytes or None: The embedding data if found, otherwise None."""
+        
         stmt = select(Embeddings2.embedding).where(Embeddings2.file_path == file_path)
         results = self.conn.execute(stmt)
         self.conn.commit()
@@ -46,6 +47,7 @@ class EmbeddingAlg(EmbeddingDbI):
         This method first checks if an embedding already exists in the database for the given file_path.
         If an existing embedding is found, it updates the embedding data.
         If no existing embedding is found, it inserts a new record into the database."""
+        
         new = insert(Embeddings2).values(file_path=file_path, embedding=pickle.dumps(embedding))
         old = update(Embeddings2).where(Embeddings2.file_path == file_path).values(embedding=pickle.dumps(embedding))
         sel = self.conn.execute(select(Embeddings2).where(Embeddings2.file_path == file_path))
@@ -59,5 +61,6 @@ class EmbeddingAlg(EmbeddingDbI):
         
         This method is used to clean up the EmbeddingAlg class instance by closing the database connection and deleting the SQLite database file.
         It should be called when the EmbeddingT5 instance is no longer needed to free up system resources."""
+        
         self.conn.close()
         os.remove("./Embeddings2.db")

@@ -77,6 +77,7 @@ class SQLite(DbInterface):
         
         Returns:
             list[tuple[str, str, str, int]]: A list of tuples containing the pull request title, body, base SHA, and issue ID."""
+        
         stmt = select(Issue.title, Issue.body, PullRequest.shaBase, Issue.id).where(PullRequest.issueId == Issue.id).where(Issue.repositoryId == self.get_repoId_from_repoName(repositoryName))
         return(self.session.execute(stmt).fetchall())
     
@@ -88,10 +89,19 @@ class SQLite(DbInterface):
         
         Returns:
             int: The database ID of the repository."""
+        
         stmt = select(Repository.id).where(Repository.fullName == repositoryName)
         return(self.session.execute(stmt).fetchone()[0])
     
     def issue_exists(self, issueId: int) -> bool:
+        """Checks if an issue with the given ID exists in the database.
+        
+        Parameters:
+            issueId (int): The ID of the issue to check for.
+        
+        Returns:
+            bool: True if the issue exists, False otherwise."""
+        
         stmt = select(func.count(TestResult.issueId)).where(TestResult.issueId == issueId)
         result = self.session.execute(stmt).scalar()
         return result > 0
